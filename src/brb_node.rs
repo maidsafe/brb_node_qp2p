@@ -10,7 +10,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
-use brb::{Actor, DeterministicBRB, Packet as BRBPacket, BRBAlgorithm};
+use brb::{Actor, BRBAlgorithm, DeterministicBRB, Packet as BRBPacket};
 use brb_algo_orswot::BRBOrswot;
 
 type Value = u64;
@@ -195,6 +195,7 @@ enum RouterCmd {
     Apply(Packet),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 enum NetworkMsg {
     HelloMyNameIs(Actor, SocketAddr),
@@ -285,7 +286,7 @@ impl Router {
                     for actor in matching_actors {
                         println!("{:?}", actor);
                     }
-                } else if matching_actors.len() == 0 {
+                } else if matching_actors.is_empty() {
                     println!("No actors with that actor id");
                 } else {
                     let actor = matching_actors[0];
@@ -310,7 +311,7 @@ impl Router {
                     for actor in matching_actors {
                         println!("{:?}", actor);
                     }
-                } else if matching_actors.len() == 0 {
+                } else if matching_actors.is_empty() {
                     println!("No actors with that actor id");
                 } else {
                     let actor = matching_actors[0];
@@ -329,6 +330,7 @@ impl Router {
                 conn.close();
             }
             RouterCmd::AddPeer(actor, addr) => {
+                #[allow(clippy::map_entry)]
                 if !self.peers.contains_key(&actor) {
                     let peer = self.new_endpoint();
                     let conn = peer.connect_to(&addr).await.unwrap();
