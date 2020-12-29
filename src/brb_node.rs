@@ -10,13 +10,13 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
-use brb::{Actor, BRBAlgorithm, DeterministicBRB, Packet as BRBPacket};
+use brb::{Actor, BRBDataType, DeterministicBRB, Packet as BRBPacket};
 use brb_algo_orswot::BRBOrswot;
 
 type Value = u64;
 type State = BRBOrswot<Value>;
 type BRB = DeterministicBRB<State>;
-type Packet = BRBPacket<<State as BRBAlgorithm>::Op>;
+type Packet = BRBPacket<<State as BRBDataType>::Op>;
 
 #[derive(Debug, Clone)]
 struct SharedBRB {
@@ -48,7 +48,7 @@ impl SharedBRB {
 
     fn exec_algo_op(
         &self,
-        f: impl FnOnce(&State) -> Option<<State as BRBAlgorithm>::Op>,
+        f: impl FnOnce(&State) -> Option<<State as BRBDataType>::Op>,
     ) -> Vec<Packet> {
         self.brb.lock().unwrap().exec_algo_op(f).unwrap()
     }
