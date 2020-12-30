@@ -61,7 +61,7 @@ impl SharedBRB {
     }
 
     fn request_leave(&mut self, actor: Actor) -> Vec<Packet> {
-        self.dsb
+        self.brb
             .lock()
             .unwrap()
             .kill_peer(actor)
@@ -72,7 +72,7 @@ impl SharedBRB {
     }
 
     fn anti_entropy(&mut self, peer: Actor) -> Option<Packet> {
-        match self.dsb.lock().unwrap().anti_entropy(peer) {
+        match self.brb.lock().unwrap().anti_entropy(peer) {
             Ok(packet) => Some(packet),
             Err(err) => {
                 println!("Error initiating anti-entropy {:?}", err);
@@ -95,17 +95,20 @@ impl SharedBRB {
     }
 
     fn apply(&self, packet: Packet) -> Vec<Packet> {
-        self.brb.lock().unwrap().handle_packet(packet).unwrap()
-    }
-
-    fn read(&self) -> HashSet<Value> {
-        match self.dsb.lock().unwrap().handle_packet(packet) {
+        match self.brb.lock().unwrap().handle_packet(packet) {
             Ok(packets) => packets,
             Err(e) => {
                 println!("dropping packet: {:?}", e);
-                vec![]
+                Default::default()
             }
         }
+    }
+
+    fn read(&self) -> HashSet<Value> {
+        self.brb
+            .lock()
+            .unwrap()
+            .read_state(|orswot| orswot.state().read().val)
     }
 }
 
@@ -181,7 +184,7 @@ impl Repl {
         match args {
             [actor_id] => {
                 self.network_tx
-                    .try_send(RouterCmd::RequestMembership(actor_id.to_string()))
+                    .try_send(RouterCmd::RequestJoin(actor_id.to_string()))
                     .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
             }
             _ => println!("help: join takes one arguments, the actor to add to the network"),
@@ -439,7 +442,7 @@ impl Router {
                 } else {
                     let actor = matching_actors[0];
                     println!("Starting join for actor: {:?}", actor);
-                    for packet in self.state.request_membership(actor) {
+                    for packet in self.state.request_join(actor) {
                         self.deliver_packet(packet).await;
                     }
                 }
