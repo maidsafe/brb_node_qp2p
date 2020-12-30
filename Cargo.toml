@@ -13,8 +13,8 @@ path = "src/brb_node.rs"
 rand = "0.7.3"
 serde = "1.0.106"
 bincode = "1.2.1"
-brb = { git = "https://github.com/dan-da/brb", branch = "anti_entropy_updates" }
-brb_algo_orswot = { git = "https://github.com/dan-da/brb_algo_orswot", branch = "dyn_membership_changes" }
+brb = { git = "https://github.com/dan-da/brb", branch = "master" }
+brb_algo_orswot = { git = "https://github.com/dan-da/brb_algo_orswot", branch = "master" }
 cmdr = { git = "https://github.com/mendelt/cmdr", rev = "8407462be39bb932ec86eea1b36ce325f3034ccb" }
 tokio = { version = "~0.2.22", features = ["full"] }
 qp2p = { git = "https://github.com/maidsafe/qp2p", rev = "10b7c25b55788cb4e1253e557cfe6d8d53d00cb0" }
