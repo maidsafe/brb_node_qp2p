@@ -6,7 +6,7 @@ use cmdr::*;
 
 use qp2p::{self, Config, Endpoint, QuicP2p};
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
@@ -35,22 +35,63 @@ impl SharedBRB {
     }
 
     fn peers(&self) -> BTreeSet<Actor> {
-        self.brb.lock().unwrap().peers().unwrap()
+        self.brb.lock().unwrap().peers().unwrap_or_else(|err| {
+            println!("[ERR] Failure while reading brb peers: {:?}", err);
+            Default::default()
+        })
     }
 
     fn trust_peer(&mut self, peer: Actor) {
-        self.brb.lock().unwrap().trust_peer(peer);
+        self.brb.lock().unwrap().force_join(peer);
     }
 
-    fn request_membership(&mut self, actor: Actor) -> Vec<Packet> {
-        self.brb.lock().unwrap().request_membership(actor).unwrap()
+    fn untrust_peer(&mut self, peer: Actor) {
+        self.brb.lock().unwrap().force_leave(peer);
     }
 
+    fn request_join(&mut self, actor: Actor) -> Vec<Packet> {
+        self.brb
+            .lock()
+            .unwrap()
+            .request_membership(actor)
+            .unwrap_or_else(|err| {
+                println!("[ERROR] Failed to request join for {:?} : {:?}", actor, err);
+                Default::default()
+            })
+    }
+
+    fn request_leave(&mut self, actor: Actor) -> Vec<Packet> {
+        self.dsb
+            .lock()
+            .unwrap()
+            .kill_peer(actor)
+            .unwrap_or_else(|err| {
+                println!("[ERROR] Failed to request leave for {:?}: {:?}", actor, err);
+                Default::default()
+            })
+    }
+
+    fn anti_entropy(&mut self, peer: Actor) -> Option<Packet> {
+        match self.dsb.lock().unwrap().anti_entropy(peer) {
+            Ok(packet) => Some(packet),
+            Err(err) => {
+                println!("Error initiating anti-entropy {:?}", err);
+                None
+            }
+        }
+    }
     fn exec_algo_op(
         &self,
         f: impl FnOnce(&State) -> Option<<State as BRBDataType>::Op>,
     ) -> Vec<Packet> {
-        self.brb.lock().unwrap().exec_algo_op(f).unwrap()
+        self.brb
+            .lock()
+            .unwrap()
+            .exec_algo_op(f)
+            .unwrap_or_else(|err| {
+                println!("Error executing algo op: {:?}", err);
+                Default::default()
+            })
     }
 
     fn apply(&self, packet: Packet) -> Vec<Packet> {
@@ -58,10 +99,13 @@ impl SharedBRB {
     }
 
     fn read(&self) -> HashSet<Value> {
-        self.brb
-            .lock()
-            .unwrap()
-            .read_state(|orswot| orswot.state().read().val)
+        match self.dsb.lock().unwrap().handle_packet(packet) {
+            Ok(packets) => packets,
+            Err(e) => {
+                println!("dropping packet: {:?}", e);
+                vec![]
+            }
+        }
     }
 }
 
@@ -83,7 +127,9 @@ impl Repl {
             [ip_port] => match ip_port.parse::<SocketAddr>() {
                 Ok(addr) => {
                     println!("[REPL] parsed addr {:?}", addr);
-                    self.network_tx.try_send(RouterCmd::SayHello(addr)).unwrap();
+                    self.network_tx
+                        .try_send(RouterCmd::SayHello(addr))
+                        .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
                 }
                 Err(e) => println!("[REPL] bad addr {:?}", e),
             },
@@ -95,7 +141,10 @@ impl Repl {
     #[cmd]
     fn peers(&mut self, args: &[String]) -> CommandResult {
         match args {
-            [] => self.network_tx.try_send(RouterCmd::ListPeers).unwrap(),
+            [] => self
+                .network_tx
+                .try_send(RouterCmd::ListPeers)
+                .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e)),
             _ => println!("help: peers expects no arguments"),
         };
         Ok(Action::Done)
@@ -107,9 +156,22 @@ impl Repl {
             [actor_id] => {
                 self.network_tx
                     .try_send(RouterCmd::Trust(actor_id.to_string()))
-                    .unwrap();
+                    .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
             }
             _ => println!("help: trust id:8sdkgalsd"),
+        };
+        Ok(Action::Done)
+    }
+
+    #[cmd]
+    fn untrust(&mut self, args: &[String]) -> CommandResult {
+        match args {
+            [actor_id] => {
+                self.network_tx
+                    .try_send(RouterCmd::Untrust(actor_id.to_string()))
+                    .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
+            }
+            _ => println!("help: untrust id:8f4e"),
         };
         Ok(Action::Done)
     }
@@ -120,10 +182,37 @@ impl Repl {
             [actor_id] => {
                 self.network_tx
                     .try_send(RouterCmd::RequestMembership(actor_id.to_string()))
-                    .unwrap();
+                    .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
             }
             _ => println!("help: join takes one arguments, the actor to add to the network"),
         };
+        Ok(Action::Done)
+    }
+
+    #[cmd]
+    fn leave(&mut self, args: &[String]) -> CommandResult {
+        match args {
+            [actor_id] => {
+                self.network_tx
+                    .try_send(RouterCmd::RequestLeave(actor_id.to_string()))
+                    .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
+            }
+            _ => println!("help: leave takes one arguments, the actor to leave the network"),
+        };
+        Ok(Action::Done)
+    }
+
+    #[cmd]
+    fn anti_entropy(&mut self, args: &[String]) -> CommandResult {
+        match args {
+            [actor_id] => {
+                self.network_tx
+                    .try_send(RouterCmd::AntiEntropy(actor_id.to_string()))
+                    .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
+            }
+            _ => println!("help: anti_entropy takes one arguments, the actor to request data from"),
+        };
+
         Ok(Action::Done)
     }
 
@@ -186,9 +275,12 @@ struct Router {
 
 #[derive(Debug)]
 enum RouterCmd {
+    AntiEntropy(String),
     ListPeers,
-    RequestMembership(String),
+    RequestJoin(String),
+    RequestLeave(String),
     Trust(String),
+    Untrust(String),
     SayHello(SocketAddr),
     AddPeer(Actor, SocketAddr),
     Deliver(Packet),
@@ -198,7 +290,7 @@ enum RouterCmd {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 enum NetworkMsg {
-    HelloMyNameIs(Actor, SocketAddr),
+    Peer(Actor, SocketAddr),
     Packet(Packet),
 }
 
@@ -243,13 +335,22 @@ impl Router {
     async fn deliver_packet(&self, packet: Packet) {
         if let Some((peer, addr)) = self.peers.get(&packet.dest) {
             println!(
-                "[P2P] delivering packet to {:?} at addr {:?}",
-                packet.dest, addr
+                "[P2P] delivering packet to {:?} at addr {:?}: {:?}",
+                packet.dest, addr, packet
             );
             let msg = bincode::serialize(&NetworkMsg::Packet(packet)).unwrap();
-            let conn = peer.connect_to(&addr).await.unwrap();
-            let _ = conn.send_uni(msg.clone().into()).await.unwrap();
-            conn.close()
+            match peer.connect_to(&addr).await {
+                Ok(conn) => {
+                    match conn.send_uni(msg.clone().into()).await {
+                        Ok(_) => println!("Sent packet successfully."),
+                        Err(e) => println!("Failed to send packet: {:?}", e),
+                    }
+                    conn.close();
+                }
+                Err(err) => {
+                    println!("Failed to connect to peer {:?}", err);
+                }
+            }
         } else {
             println!(
                 "[P2P] we don't have a peer matching the destination for packet {:?}",
@@ -261,17 +362,64 @@ impl Router {
     async fn apply(&mut self, cmd: RouterCmd) {
         println!("[P2P] router cmd {:?}", cmd);
         match cmd {
-            RouterCmd::ListPeers => {
-                let voting_peers = self.state.peers();
-                for (actor, (_, addr)) in self.peers.iter() {
-                    if voting_peers.contains(actor) {
-                        println!("{:?}@{:?}\t(voting)", actor, addr);
-                    } else {
-                        println!("{:?}@{:?}", actor, addr);
+            RouterCmd::AntiEntropy(actor_id) => {
+                let matching_actors: Vec<Actor> = self
+                    .peers
+                    .iter()
+                    .map(|(actor, _)| actor)
+                    .cloned()
+                    .filter(|actor| format!("{:?}", actor).starts_with(&actor_id))
+                    .collect();
+
+                if matching_actors.len() > 1 {
+                    println!("Ambiguous actor id, more than one actor matches:");
+
+                    for actor in matching_actors {
+                        println!("{:?}", actor);
+                    }
+                } else if matching_actors.len() == 0 {
+                    println!("No actors with that actor id");
+                } else {
+                    let actor = matching_actors[0];
+                    println!("Starting anti-entropy with actor: {:?}", actor);
+
+                    if let Some(packet) = self.state.anti_entropy(actor) {
+                        self.deliver_packet(packet).await;
                     }
                 }
             }
-            RouterCmd::RequestMembership(actor_id) => {
+            RouterCmd::ListPeers => {
+                let voting_peers = self.state.peers();
+
+                let peer_addrs: BTreeMap<_, _> = self
+                    .peers
+                    .iter()
+                    .map(|(p, (_, addr))| (*p, *addr))
+                    .collect();
+
+                let identities: BTreeSet<_> = voting_peers
+                    .iter()
+                    .cloned()
+                    .chain(peer_addrs.keys().cloned())
+                    .collect();
+
+                for id in identities {
+                    let mut line = format!("{:?}", id);
+                    line.push_str("@");
+                    match peer_addrs.get(&id) {
+                        Some(addr) => line.push_str(&format!("{:?}", addr)),
+                        None => line.push_str("<unknown>"),
+                    };
+                    if voting_peers.contains(&id) {
+                        line.push_str("\t(voting)");
+                    }
+                    if id == self.state.actor() {
+                        line.push_str("\t(self)");
+                    }
+                    println!("{}", line);
+                }
+            }
+            RouterCmd::RequestJoin(actor_id) => {
                 let matching_actors: Vec<Actor> = self
                     .peers
                     .iter()
@@ -296,6 +444,31 @@ impl Router {
                     }
                 }
             }
+            RouterCmd::RequestLeave(actor_id) => {
+                let matching_actors: Vec<Actor> = self
+                    .peers
+                    .iter()
+                    .map(|(actor, _)| actor)
+                    .cloned()
+                    .filter(|actor| format!("{:?}", actor).starts_with(&actor_id))
+                    .collect();
+
+                if matching_actors.len() > 1 {
+                    println!("Ambiguous actor id, more than one actor matches:");
+
+                    for actor in matching_actors {
+                        println!("{:?}", actor);
+                    }
+                } else if matching_actors.len() == 0 {
+                    println!("No actors with that actor id");
+                } else {
+                    let actor = matching_actors[0];
+                    println!("Starting leave for actor: {:?}", actor);
+                    for packet in self.state.request_leave(actor) {
+                        self.deliver_packet(packet).await;
+                    }
+                }
+            }
             RouterCmd::Trust(actor_id) => {
                 let matching_actors: Vec<Actor> = self
                     .peers
@@ -316,32 +489,70 @@ impl Router {
                 } else {
                     let actor = matching_actors[0];
                     println!("Trusting actor: {:?}", actor);
-                    self.state.trust_peer(actor); // TODO: rename state to brb
+                    self.state.trust_peer(actor);
+                }
+            }
+            RouterCmd::Untrust(actor_id) => {
+                let matching_actors: Vec<Actor> = self
+                    .peers
+                    .iter()
+                    .map(|(actor, _)| actor)
+                    .cloned()
+                    .filter(|actor| format!("{:?}", actor).starts_with(&actor_id))
+                    .collect();
+
+                if matching_actors.len() > 1 {
+                    println!("Ambiguous actor id, more than one actor matches:");
+
+                    for actor in matching_actors {
+                        println!("{:?}", actor);
+                    }
+                } else if matching_actors.len() == 0 {
+                    println!("No actors with that actor id");
+                } else {
+                    let actor = matching_actors[0];
+                    println!("Trusting actor: {:?}", actor);
+                    self.state.untrust_peer(actor);
                 }
             }
             RouterCmd::SayHello(addr) => {
                 let peer = self.new_endpoint();
-                let conn = peer.connect_to(&addr).await.unwrap();
-                // self.peers.insert(actor, (peer, addr));
-                let msg =
-                    bincode::serialize(&NetworkMsg::HelloMyNameIs(self.state.actor(), self.addr))
-                        .unwrap();
-                let _ = conn.send_uni(msg.into()).await.unwrap();
-                conn.close();
+                match peer.connect_to(&addr).await {
+                    Ok(conn) => {
+                        let msg =
+                            bincode::serialize(&NetworkMsg::Peer(self.state.actor(), self.addr))
+                                .unwrap();
+                        let _ = conn.send_uni(msg.into()).await.unwrap();
+                        conn.close();
+                    }
+                    Err(err) => {
+                        println!("Failed to connect to peer {:?}", err);
+                    }
+                }
             }
-            RouterCmd::AddPeer(actor, addr) => {
+            RouterCmd::AddPeer(actor, addr) =>
+            {
                 #[allow(clippy::map_entry)]
                 if !self.peers.contains_key(&actor) {
                     let peer = self.new_endpoint();
-                    let conn = peer.connect_to(&addr).await.unwrap();
-                    self.peers.insert(actor, (peer, addr));
-                    let msg = bincode::serialize(&NetworkMsg::HelloMyNameIs(
-                        self.state.actor(),
-                        self.addr,
-                    ))
-                    .unwrap();
-                    let _ = conn.send_uni(msg.into()).await.unwrap();
-                    conn.close();
+                    match peer.connect_to(&addr).await {
+                        Ok(conn) => {
+                            for (peer_actor, (_, peer_addr)) in self.peers.iter() {
+                                let msg =
+                                    bincode::serialize(&NetworkMsg::Peer(*peer_actor, *peer_addr))
+                                        .unwrap();
+                                match conn.send_uni(msg.into()).await {
+                                    Ok(_) => (),
+                                    Err(e) => println!("Failed to gossip peers: {:?}", e),
+                                }
+                            }
+                            conn.close();
+                            self.peers.insert(actor, (peer, addr));
+                        }
+                        Err(e) => {
+                            println!("Error connecting to peer {:?}: {:?}", addr, e);
+                        }
+                    }
                 }
             }
             RouterCmd::Deliver(packet) => {
@@ -371,7 +582,7 @@ async fn listen_for_network_msgs(endpoint: Endpoint, mut router_tx: mpsc::Sender
                     let net_msg: NetworkMsg =
                         bincode::deserialize(&msg.get_message_data()).unwrap();
                     let cmd = match net_msg {
-                        NetworkMsg::HelloMyNameIs(actor, addr) => RouterCmd::AddPeer(actor, addr),
+                        NetworkMsg::Peer(actor, addr) => RouterCmd::AddPeer(actor, addr),
                         NetworkMsg::Packet(packet) => RouterCmd::Apply(packet),
                     };
 
@@ -384,6 +595,8 @@ async fn listen_for_network_msgs(endpoint: Endpoint, mut router_tx: mpsc::Sender
         }
         Err(e) => println!("[P2P/ERROR] failed to start listening: {:?}", e),
     }
+
+    println!("Finished listening for connections");
 }
 
 #[tokio::main]
