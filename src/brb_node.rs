@@ -11,7 +11,7 @@ use std::{
 };
 
 use brb::{Actor, BRBDataType, DeterministicBRB, Packet as BRBPacket};
-use brb_algo_orswot::BRBOrswot;
+use brb_dt_orswot::BRBOrswot;
 
 type Value = u64;
 type State = BRBOrswot<Value>;
@@ -80,16 +80,16 @@ impl SharedBRB {
             }
         }
     }
-    fn exec_algo_op(
+    fn exec_dt_op(
         &self,
         f: impl FnOnce(&State) -> Option<<State as BRBDataType>::Op>,
     ) -> Vec<Packet> {
         self.brb
             .lock()
             .unwrap()
-            .exec_algo_op(f)
+            .exec_dt_op(f)
             .unwrap_or_else(|err| {
-                println!("Error executing algo op: {:?}", err);
+                println!("Error executing datatype op: {:?}", err);
                 Default::default()
             })
     }
@@ -224,7 +224,7 @@ impl Repl {
         match args {
             [arg] => match arg.parse::<Value>() {
                 Ok(v) => {
-                    for packet in self.state.exec_algo_op(|orswot| Some(orswot.add(v))) {
+                    for packet in self.state.exec_dt_op(|orswot| Some(orswot.add(v))) {
                         self.network_tx
                             .try_send(RouterCmd::Deliver(packet))
                             .expect("Failed to queue packet");
@@ -242,7 +242,7 @@ impl Repl {
         match args {
             [arg] => match arg.parse::<Value>() {
                 Ok(v) => {
-                    for packet in self.state.exec_algo_op(|orswot| orswot.rm(v)) {
+                    for packet in self.state.exec_dt_op(|orswot| orswot.rm(v)) {
                         self.network_tx
                             .try_send(RouterCmd::Deliver(packet))
                             .expect("Failed to queue packet");
