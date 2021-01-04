@@ -380,7 +380,7 @@ impl Router {
                     for actor in matching_actors {
                         println!("{:?}", actor);
                     }
-                } else if matching_actors.len() == 0 {
+                } else if matching_actors.is_empty() {
                     println!("No actors with that actor id");
                 } else {
                     let actor = matching_actors[0];
@@ -408,7 +408,7 @@ impl Router {
 
                 for id in identities {
                     let mut line = format!("{:?}", id);
-                    line.push_str("@");
+                    line.push('@');
                     match peer_addrs.get(&id) {
                         Some(addr) => line.push_str(&format!("{:?}", addr)),
                         None => line.push_str("<unknown>"),
@@ -462,7 +462,7 @@ impl Router {
                     for actor in matching_actors {
                         println!("{:?}", actor);
                     }
-                } else if matching_actors.len() == 0 {
+                } else if matching_actors.is_empty() {
                     println!("No actors with that actor id");
                 } else {
                     let actor = matching_actors[0];
@@ -510,7 +510,7 @@ impl Router {
                     for actor in matching_actors {
                         println!("{:?}", actor);
                     }
-                } else if matching_actors.len() == 0 {
+                } else if matching_actors.is_empty() {
                     println!("No actors with that actor id");
                 } else {
                     let actor = matching_actors[0];
