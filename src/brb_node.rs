@@ -34,6 +34,14 @@ impl SharedBRB {
         self.brb.lock().unwrap().actor()
     }
 
+    fn add(&self, v: Value) -> <State as BRBDataType>::Op {
+        self.brb.lock().unwrap().dt.add(v)
+    }
+
+    fn rm(&self, v: Value) -> <State as BRBDataType>::Op {
+        self.brb.lock().unwrap().dt.rm(v)
+    }
+
     fn peers(&self) -> BTreeSet<Actor> {
         self.brb.lock().unwrap().peers().unwrap_or_else(|err| {
             println!("[ERR] Failure while reading brb peers: {:?}", err);
@@ -80,18 +88,12 @@ impl SharedBRB {
             }
         }
     }
-    fn exec_dt_op(
-        &self,
-        f: impl FnOnce(&State) -> Option<<State as BRBDataType>::Op>,
-    ) -> Vec<Packet> {
-        self.brb
-            .lock()
-            .unwrap()
-            .exec_dt_op(f)
-            .unwrap_or_else(|err| {
-                println!("Error executing datatype op: {:?}", err);
-                Default::default()
-            })
+
+    fn exec_op(&self, op: <State as BRBDataType>::Op) -> Vec<Packet> {
+        self.brb.lock().unwrap().exec_op(op).unwrap_or_else(|err| {
+            println!("Error executing datatype op: {:?}", err);
+            Default::default()
+        })
     }
 
     fn apply(&self, packet: Packet) -> Vec<Packet> {
@@ -105,10 +107,7 @@ impl SharedBRB {
     }
 
     fn read(&self) -> HashSet<Value> {
-        self.brb
-            .lock()
-            .unwrap()
-            .read_state(|orswot| orswot.state().read().val)
+        self.brb.lock().unwrap().dt.read()
     }
 }
 
@@ -224,7 +223,7 @@ impl Repl {
         match args {
             [arg] => match arg.parse::<Value>() {
                 Ok(v) => {
-                    for packet in self.state.exec_dt_op(|orswot| Some(orswot.add(v))) {
+                    for packet in self.state.exec_op(self.state.add(v)) {
                         self.network_tx
                             .try_send(RouterCmd::Deliver(packet))
                             .expect("Failed to queue packet");
@@ -242,7 +241,7 @@ impl Repl {
         match args {
             [arg] => match arg.parse::<Value>() {
                 Ok(v) => {
-                    for packet in self.state.exec_dt_op(|orswot| orswot.rm(v)) {
+                    for packet in self.state.exec_op(self.state.rm(v)) {
                         self.network_tx
                             .try_send(RouterCmd::Deliver(packet))
                             .expect("Failed to queue packet");
