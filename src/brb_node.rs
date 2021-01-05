@@ -34,12 +34,14 @@ impl SharedBRB {
         self.brb.lock().unwrap().actor()
     }
 
-    fn add(&self, v: Value) -> <State as BRBDataType>::Op {
-        self.brb.lock().unwrap().dt.add(v)
+    fn add(&self, v: Value) -> Vec<Packet> {
+        let op = { self.brb.lock().unwrap().dt.add(v) }; // wrap to release the after op
+        self.exec_op(op)
     }
 
-    fn rm(&self, v: Value) -> <State as BRBDataType>::Op {
-        self.brb.lock().unwrap().dt.rm(v)
+    fn rm(&self, v: Value) -> Vec<Packet> {
+        let op = { self.brb.lock().unwrap().dt.rm(v) }; // wrap to releease lock after op
+        self.exec_op(op)
     }
 
     fn peers(&self) -> BTreeSet<Actor> {
@@ -223,7 +225,7 @@ impl Repl {
         match args {
             [arg] => match arg.parse::<Value>() {
                 Ok(v) => {
-                    for packet in self.state.exec_op(self.state.add(v)) {
+                    for packet in self.state.add(v) {
                         self.network_tx
                             .try_send(RouterCmd::Deliver(packet))
                             .expect("Failed to queue packet");
@@ -241,7 +243,7 @@ impl Repl {
         match args {
             [arg] => match arg.parse::<Value>() {
                 Ok(v) => {
-                    for packet in self.state.exec_op(self.state.rm(v)) {
+                    for packet in self.state.rm(v) {
                         self.network_tx
                             .try_send(RouterCmd::Deliver(packet))
                             .expect("Failed to queue packet");
