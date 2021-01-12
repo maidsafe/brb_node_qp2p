@@ -109,7 +109,7 @@ impl SharedBRB {
     }
 
     fn read(&self) -> HashSet<Value> {
-        self.brb.lock().unwrap().dt.read()
+        self.brb.lock().unwrap().dt.orswot().read().val
     }
 }
 
