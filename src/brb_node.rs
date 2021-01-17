@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
@@ -6,7 +7,7 @@ use cmdr::*;
 
 use qp2p::{self, Config, Endpoint, QuicP2p};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
@@ -221,6 +222,14 @@ impl Repl {
     }
 
     #[cmd]
+    fn retry(&mut self, _args: &[String]) -> CommandResult {
+        self.network_tx
+            .try_send(RouterCmd::Retry)
+            .expect("Failed to queue router cmd");
+        Ok(Action::Done)
+    }
+
+    #[cmd]
     fn add(&mut self, args: &[String]) -> CommandResult {
         match args {
             [arg] => match arg.parse::<Value>() {
@@ -264,7 +273,9 @@ impl Repl {
 
     #[cmd]
     fn dbg(&mut self, _args: &[String]) -> CommandResult {
-        println!("{:#?}", self);
+        self.network_tx
+            .try_send(RouterCmd::Debug)
+            .expect("Failed to queue router cmd");
         Ok(Action::Done)
     }
 }
@@ -274,11 +285,14 @@ struct Router {
     state: SharedBRB,
     qp2p: QuicP2p,
     addr: SocketAddr,
-    peers: HashMap<Actor, (Endpoint, SocketAddr)>,
+    peers: HashMap<Actor, SocketAddr>,
+    unacked_packets: VecDeque<Packet>,
 }
 
 #[derive(Debug)]
 enum RouterCmd {
+    Retry,
+    Debug,
     AntiEntropy(String),
     ListPeers,
     RequestJoin(String),
@@ -289,6 +303,7 @@ enum RouterCmd {
     AddPeer(Actor, SocketAddr),
     Deliver(Packet),
     Apply(Packet),
+    Acked(Packet),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -296,6 +311,7 @@ enum RouterCmd {
 enum NetworkMsg {
     Peer(Actor, SocketAddr),
     Packet(Packet),
+    Ack(Packet),
 }
 
 impl Router {
@@ -321,6 +337,7 @@ impl Router {
             qp2p,
             addr,
             peers: Default::default(),
+            unacked_packets: Default::default(),
         };
 
         (router, endpoint)
@@ -336,14 +353,16 @@ impl Router {
         }
     }
 
-    async fn deliver_packet(&self, packet: Packet) {
-        if let Some((peer, addr)) = self.peers.get(&packet.dest) {
+    async fn deliver_packet(&mut self, packet: Packet) {
+        if let Some(peer_addr) = self.peers.get(&packet.dest) {
             println!(
                 "[P2P] delivering packet to {:?} at addr {:?}: {:?}",
-                packet.dest, addr, packet
+                packet.dest, peer_addr, packet
             );
+            self.unacked_packets.push_back(packet.clone());
             let msg = bincode::serialize(&NetworkMsg::Packet(packet)).unwrap();
-            match peer.connect_to(&addr).await {
+            let peer = self.new_endpoint();
+            match peer.connect_to(&peer_addr).await {
                 Ok(conn) => {
                     match conn.send_uni(msg.clone().into()).await {
                         Ok(_) => println!("Sent packet successfully."),
@@ -366,6 +385,17 @@ impl Router {
     async fn apply(&mut self, cmd: RouterCmd) {
         println!("[P2P] router cmd {:?}", cmd);
         match cmd {
+            RouterCmd::Retry => {
+                let packets_to_retry = self.unacked_packets.clone();
+                self.unacked_packets = Default::default();
+                for packet in packets_to_retry {
+                    println!("Retrying packet: {:#?}", packet);
+                    self.deliver_packet(packet).await
+                }
+            }
+            RouterCmd::Debug => {
+                println!("{:#?}", self);
+            }
             RouterCmd::AntiEntropy(actor_id) => {
                 let matching_actors: Vec<Actor> = self
                     .peers
@@ -395,11 +425,8 @@ impl Router {
             RouterCmd::ListPeers => {
                 let voting_peers = self.state.peers();
 
-                let peer_addrs: BTreeMap<_, _> = self
-                    .peers
-                    .iter()
-                    .map(|(p, (_, addr))| (*p, *addr))
-                    .collect();
+                let peer_addrs: BTreeMap<_, _> =
+                    self.peers.iter().map(|(p, addr)| (*p, *addr)).collect();
 
                 let identities: BTreeSet<_> = voting_peers
                     .iter()
@@ -541,7 +568,7 @@ impl Router {
                     let peer = self.new_endpoint();
                     match peer.connect_to(&addr).await {
                         Ok(conn) => {
-                            for (peer_actor, (_, peer_addr)) in self.peers.iter() {
+                            for (peer_actor, peer_addr) in self.peers.iter() {
                                 let msg =
                                     bincode::serialize(&NetworkMsg::Peer(*peer_actor, *peer_addr))
                                         .unwrap();
@@ -551,7 +578,7 @@ impl Router {
                                 }
                             }
                             conn.close();
-                            self.peers.insert(actor, (peer, addr));
+                            self.peers.insert(actor, addr);
                         }
                         Err(e) => {
                             println!("Error connecting to peer {:?}: {:?}", addr, e);
@@ -563,9 +590,44 @@ impl Router {
                 self.deliver_packet(packet).await;
             }
             RouterCmd::Apply(op_packet) => {
-                for packet in self.state.apply(op_packet) {
+                for packet in self.state.apply(op_packet.clone()) {
                     self.deliver_packet(packet).await;
                 }
+
+                if let Some(peer_addr) = self.peers.get(&op_packet.source) {
+                    println!(
+                        "[P2P] delivering Ack(packet) to {:?} at addr {:?}: {:?}",
+                        op_packet.dest, peer_addr, op_packet
+                    );
+                    let msg = bincode::serialize(&NetworkMsg::Ack(op_packet)).unwrap();
+                    let peer = self.new_endpoint();
+                    match peer.connect_to(&peer_addr).await {
+                        Ok(conn) => {
+                            match conn.send_uni(msg.clone().into()).await {
+                                Ok(_) => println!("Sent Ack(packet) successfully."),
+                                Err(e) => println!("Failed to send packet: {:?}", e),
+                            }
+                            conn.close();
+                        }
+                        Err(err) => {
+                            println!("Failed to connect to peer {:?}", err);
+                        }
+                    }
+                } else {
+                    println!(
+                        "[P2P] we don't have a peer matching the destination for packet {:?}",
+                        op_packet
+                    );
+                }
+            }
+            RouterCmd::Acked(packet) => {
+                self.unacked_packets
+                    .iter()
+                    .position(|p| p == &packet)
+                    .map(|idx| {
+                        println!("Got ack for packet {:?}", packet);
+                        self.unacked_packets.remove(idx)
+                    });
             }
         }
     }
@@ -588,6 +650,7 @@ async fn listen_for_network_msgs(endpoint: Endpoint, mut router_tx: mpsc::Sender
                     let cmd = match net_msg {
                         NetworkMsg::Peer(actor, addr) => RouterCmd::AddPeer(actor, addr),
                         NetworkMsg::Packet(packet) => RouterCmd::Apply(packet),
+                        NetworkMsg::Ack(packet) => RouterCmd::Acked(packet),
                     };
 
                     router_tx
