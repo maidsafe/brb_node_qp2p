@@ -347,6 +347,29 @@ impl Router {
         self.qp2p.new_endpoint().expect("Failed to create endpoint")
     }
 
+    fn resolve_actor(&self, actor_id: &str) -> Option<Actor> {
+        let matching_actors: Vec<Actor> = self
+            .peers
+            .iter()
+            .map(|(actor, _)| actor)
+            .cloned()
+            .filter(|actor| format!("{:?}", actor).starts_with(&actor_id))
+            .collect();
+
+        if matching_actors.len() > 1 {
+            println!("Ambiguous actor id, more than one actor matches:");
+            for actor in matching_actors {
+                println!("{:?}", actor);
+            }
+            None
+        } else if matching_actors.is_empty() {
+            println!("No actors with that actor id");
+            None
+        } else {
+            Some(matching_actors[0])
+        }
+    }
+
     async fn listen_for_cmds(mut self, mut net_rx: mpsc::Receiver<RouterCmd>) {
         while let Some(net_cmd) = net_rx.recv().await {
             self.apply(net_cmd).await;
@@ -406,26 +429,8 @@ impl Router {
                 println!("{:#?}", self);
             }
             RouterCmd::AntiEntropy(actor_id) => {
-                let matching_actors: Vec<Actor> = self
-                    .peers
-                    .iter()
-                    .map(|(actor, _)| actor)
-                    .cloned()
-                    .filter(|actor| format!("{:?}", actor).starts_with(&actor_id))
-                    .collect();
-
-                if matching_actors.len() > 1 {
-                    println!("Ambiguous actor id, more than one actor matches:");
-
-                    for actor in matching_actors {
-                        println!("{:?}", actor);
-                    }
-                } else if matching_actors.is_empty() {
-                    println!("No actors with that actor id");
-                } else {
-                    let actor = matching_actors[0];
+                if let Some(actor) = self.resolve_actor(&actor_id) {
                     println!("Starting anti-entropy with actor: {:?}", actor);
-
                     if let Some(packet) = self.state.anti_entropy(actor) {
                         self.deliver_packet(packet).await;
                     }
@@ -460,24 +465,7 @@ impl Router {
                 }
             }
             RouterCmd::RequestJoin(actor_id) => {
-                let matching_actors: Vec<Actor> = self
-                    .peers
-                    .iter()
-                    .map(|(actor, _)| actor)
-                    .cloned()
-                    .filter(|actor| format!("{:?}", actor).starts_with(&actor_id))
-                    .collect();
-
-                if matching_actors.len() > 1 {
-                    println!("Ambiguous actor id, more than one actor matches:");
-
-                    for actor in matching_actors {
-                        println!("{:?}", actor);
-                    }
-                } else if matching_actors.is_empty() {
-                    println!("No actors with that actor id");
-                } else {
-                    let actor = matching_actors[0];
+                if let Some(actor) = self.resolve_actor(&actor_id) {
                     println!("Starting join for actor: {:?}", actor);
                     for packet in self.state.request_join(actor) {
                         self.deliver_packet(packet).await;
@@ -485,24 +473,7 @@ impl Router {
                 }
             }
             RouterCmd::RequestLeave(actor_id) => {
-                let matching_actors: Vec<Actor> = self
-                    .peers
-                    .iter()
-                    .map(|(actor, _)| actor)
-                    .cloned()
-                    .filter(|actor| format!("{:?}", actor).starts_with(&actor_id))
-                    .collect();
-
-                if matching_actors.len() > 1 {
-                    println!("Ambiguous actor id, more than one actor matches:");
-
-                    for actor in matching_actors {
-                        println!("{:?}", actor);
-                    }
-                } else if matching_actors.is_empty() {
-                    println!("No actors with that actor id");
-                } else {
-                    let actor = matching_actors[0];
+                if let Some(actor) = self.resolve_actor(&actor_id) {
                     println!("Starting leave for actor: {:?}", actor);
                     for packet in self.state.request_leave(actor) {
                         self.deliver_packet(packet).await;
@@ -510,47 +481,13 @@ impl Router {
                 }
             }
             RouterCmd::Trust(actor_id) => {
-                let matching_actors: Vec<Actor> = self
-                    .peers
-                    .iter()
-                    .map(|(actor, _)| actor)
-                    .cloned()
-                    .filter(|actor| format!("{:?}", actor).starts_with(&actor_id))
-                    .collect();
-
-                if matching_actors.len() > 1 {
-                    println!("Ambiguous actor id, more than one actor matches:");
-
-                    for actor in matching_actors {
-                        println!("{:?}", actor);
-                    }
-                } else if matching_actors.is_empty() {
-                    println!("No actors with that actor id");
-                } else {
-                    let actor = matching_actors[0];
+                if let Some(actor) = self.resolve_actor(&actor_id) {
                     println!("Trusting actor: {:?}", actor);
                     self.state.trust_peer(actor);
                 }
             }
             RouterCmd::Untrust(actor_id) => {
-                let matching_actors: Vec<Actor> = self
-                    .peers
-                    .iter()
-                    .map(|(actor, _)| actor)
-                    .cloned()
-                    .filter(|actor| format!("{:?}", actor).starts_with(&actor_id))
-                    .collect();
-
-                if matching_actors.len() > 1 {
-                    println!("Ambiguous actor id, more than one actor matches:");
-
-                    for actor in matching_actors {
-                        println!("{:?}", actor);
-                    }
-                } else if matching_actors.is_empty() {
-                    println!("No actors with that actor id");
-                } else {
-                    let actor = matching_actors[0];
+                if let Some(actor) = self.resolve_actor(&actor_id) {
                     println!("Trusting actor: {:?}", actor);
                     self.state.untrust_peer(actor);
                 }
