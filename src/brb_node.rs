@@ -353,32 +353,41 @@ impl Router {
         }
     }
 
-    async fn deliver_packet(&mut self, packet: Packet) {
-        if let Some(peer_addr) = self.peers.get(&packet.dest) {
-            println!(
-                "[P2P] delivering packet to {:?} at addr {:?}: {:?}",
-                packet.dest, peer_addr, packet
-            );
-            self.unacked_packets.push_back(packet.clone());
-            let msg = bincode::serialize(&NetworkMsg::Packet(packet)).unwrap();
-            let peer = self.new_endpoint();
-            match peer.connect_to(&peer_addr).await {
-                Ok(conn) => {
-                    match conn.send_uni(msg.clone().into()).await {
-                        Ok(_) => println!("Sent packet successfully."),
-                        Err(e) => println!("Failed to send packet: {:?}", e),
-                    }
-                    conn.close();
+    async fn deliver_network_msg(&self, network_msg: &NetworkMsg, dest_addr: &SocketAddr) {
+        let msg = bincode::serialize(&network_msg).unwrap();
+        let endpoint = self.new_endpoint();
+        match endpoint.connect_to(&dest_addr).await {
+            Ok(conn) => {
+                match conn.send_uni(msg.clone().into()).await {
+                    Ok(_) => println!("Sent network msg successfully."),
+                    Err(e) => println!("Failed to send network msg: {:?}", e),
                 }
-                Err(err) => {
-                    println!("Failed to connect to peer {:?}", err);
-                }
+                conn.close();
             }
-        } else {
-            println!(
+            Err(err) => {
+                println!(
+                    "Failed to connect to destination {:?}: {:?}",
+                    dest_addr, err
+                );
+            }
+        }
+    }
+
+    async fn deliver_packet(&mut self, packet: Packet) {
+        match self.peers.get(&packet.dest) {
+            Some(peer_addr) => {
+                println!(
+                    "[P2P] delivering packet to {:?} at addr {:?}: {:?}",
+                    packet.dest, peer_addr, packet
+                );
+                self.unacked_packets.push_back(packet.clone());
+                self.deliver_network_msg(&NetworkMsg::Packet(packet), &peer_addr)
+                    .await;
+            }
+            None => println!(
                 "[P2P] we don't have a peer matching the destination for packet {:?}",
                 packet
-            );
+            ),
         }
     }
 
@@ -547,43 +556,18 @@ impl Router {
                 }
             }
             RouterCmd::SayHello(addr) => {
-                let peer = self.new_endpoint();
-                match peer.connect_to(&addr).await {
-                    Ok(conn) => {
-                        let msg =
-                            bincode::serialize(&NetworkMsg::Peer(self.state.actor(), self.addr))
-                                .unwrap();
-                        let _ = conn.send_uni(msg.into()).await.unwrap();
-                        conn.close();
-                    }
-                    Err(err) => {
-                        println!("Failed to connect to peer {:?}", err);
-                    }
-                }
+                self.deliver_network_msg(&NetworkMsg::Peer(self.state.actor(), self.addr), &addr)
+                    .await
             }
             RouterCmd::AddPeer(actor, addr) =>
             {
                 #[allow(clippy::map_entry)]
                 if !self.peers.contains_key(&actor) {
-                    let peer = self.new_endpoint();
-                    match peer.connect_to(&addr).await {
-                        Ok(conn) => {
-                            for (peer_actor, peer_addr) in self.peers.iter() {
-                                let msg =
-                                    bincode::serialize(&NetworkMsg::Peer(*peer_actor, *peer_addr))
-                                        .unwrap();
-                                match conn.send_uni(msg.into()).await {
-                                    Ok(_) => (),
-                                    Err(e) => println!("Failed to gossip peers: {:?}", e),
-                                }
-                            }
-                            conn.close();
-                            self.peers.insert(actor, addr);
-                        }
-                        Err(e) => {
-                            println!("Error connecting to peer {:?}: {:?}", addr, e);
-                        }
+                    for (peer_actor, peer_addr) in self.peers.iter() {
+                        self.deliver_network_msg(&NetworkMsg::Peer(*peer_actor, *peer_addr), &addr)
+                            .await;
                     }
+                    self.peers.insert(actor, addr);
                 }
             }
             RouterCmd::Deliver(packet) => {
@@ -599,20 +583,8 @@ impl Router {
                         "[P2P] delivering Ack(packet) to {:?} at addr {:?}: {:?}",
                         op_packet.dest, peer_addr, op_packet
                     );
-                    let msg = bincode::serialize(&NetworkMsg::Ack(op_packet)).unwrap();
-                    let peer = self.new_endpoint();
-                    match peer.connect_to(&peer_addr).await {
-                        Ok(conn) => {
-                            match conn.send_uni(msg.clone().into()).await {
-                                Ok(_) => println!("Sent Ack(packet) successfully."),
-                                Err(e) => println!("Failed to send packet: {:?}", e),
-                            }
-                            conn.close();
-                        }
-                        Err(err) => {
-                            println!("Failed to connect to peer {:?}", err);
-                        }
-                    }
+                    self.deliver_network_msg(&NetworkMsg::Ack(op_packet), &peer_addr)
+                        .await;
                 } else {
                     println!(
                         "[P2P] we don't have a peer matching the destination for packet {:?}",
