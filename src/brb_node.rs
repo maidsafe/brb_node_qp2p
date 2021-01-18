@@ -11,13 +11,14 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
-use brb::{Actor, BRBDataType, DeterministicBRB, Packet as BRBPacket};
+use brb::membership::actor::ed25519::{Actor, Sig, SigningActor};
+use brb::{BRBDataType, DeterministicBRB, Packet as BRBPacket};
 use brb_dt_orswot::BRBOrswot;
 
 type Value = u64;
-type State = BRBOrswot<Value>;
-type BRB = DeterministicBRB<State>;
-type Packet = BRBPacket<<State as BRBDataType>::Op>;
+type State = BRBOrswot<Actor, Value>;
+type BRB = DeterministicBRB<Actor, SigningActor, Sig, State>;
+type Packet = BRBPacket<Actor, Sig, <State as BRBDataType<Actor>>::Op>;
 
 #[derive(Debug, Clone)]
 struct SharedBRB {
@@ -92,7 +93,7 @@ impl SharedBRB {
         }
     }
 
-    fn exec_op(&self, op: <State as BRBDataType>::Op) -> Vec<Packet> {
+    fn exec_op(&self, op: <State as BRBDataType<Actor>>::Op) -> Vec<Packet> {
         self.brb.lock().unwrap().exec_op(op).unwrap_or_else(|err| {
             println!("Error executing datatype op: {:?}", err);
             Default::default()
