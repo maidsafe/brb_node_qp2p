@@ -5,6 +5,9 @@ use tokio::sync::mpsc;
 
 use cmdr::*;
 
+use log::{debug, error, info, warn};
+use std::io::Write;
+
 use qp2p::{self, Config, Endpoint, QuicP2p};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
@@ -48,7 +51,7 @@ impl SharedBRB {
 
     fn peers(&self) -> BTreeSet<Actor> {
         self.brb.lock().unwrap().peers().unwrap_or_else(|err| {
-            println!("[ERR] Failure while reading brb peers: {:?}", err);
+            error!("[CLI] Failure while reading brb peers: {:?}", err);
             Default::default()
         })
     }
@@ -67,7 +70,7 @@ impl SharedBRB {
             .unwrap()
             .request_membership(actor)
             .unwrap_or_else(|err| {
-                println!("[ERROR] Failed to request join for {:?} : {:?}", actor, err);
+                error!("[CLI] Failed to request join for {:?} : {:?}", actor, err);
                 Default::default()
             })
     }
@@ -78,7 +81,7 @@ impl SharedBRB {
             .unwrap()
             .kill_peer(actor)
             .unwrap_or_else(|err| {
-                println!("[ERROR] Failed to request leave for {:?}: {:?}", actor, err);
+                error!("[CLI] Failed to request leave for {:?}: {:?}", actor, err);
                 Default::default()
             })
     }
@@ -87,7 +90,7 @@ impl SharedBRB {
         match self.brb.lock().unwrap().anti_entropy(peer) {
             Ok(packet) => Some(packet),
             Err(err) => {
-                println!("Error initiating anti-entropy {:?}", err);
+                error!("[CLI] Failed initiating anti-entropy {:?}", err);
                 None
             }
         }
@@ -95,7 +98,7 @@ impl SharedBRB {
 
     fn exec_op(&self, op: <State as BRBDataType<Actor>>::Op) -> Vec<Packet> {
         self.brb.lock().unwrap().exec_op(op).unwrap_or_else(|err| {
-            println!("Error executing datatype op: {:?}", err);
+            error!("[CLI] Error executing datatype op: {:?}", err);
             Default::default()
         })
     }
@@ -104,7 +107,7 @@ impl SharedBRB {
         match self.brb.lock().unwrap().handle_packet(packet) {
             Ok(packets) => packets,
             Err(e) => {
-                println!("dropping packet: {:?}", e);
+                error!("[CLI] dropping packet: {:?}", e);
                 Default::default()
             }
         }
@@ -132,12 +135,14 @@ impl Repl {
         match args {
             [ip_port] => match ip_port.parse::<SocketAddr>() {
                 Ok(addr) => {
-                    println!("[REPL] parsed addr {:?}", addr);
+                    info!("[REPL] parsed addr {:?}", addr);
                     self.network_tx
                         .try_send(RouterCmd::SayHello(addr))
-                        .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
+                        .unwrap_or_else(|e| {
+                            error!("[REPL] Failed to queue router command {:?}", e)
+                        });
                 }
-                Err(e) => println!("[REPL] bad addr {:?}", e),
+                Err(e) => error!("[REPL] bad addr {:?}", e),
             },
             _ => println!("help: peer <ip>:<port>"),
         };
@@ -150,7 +155,7 @@ impl Repl {
             [] => self
                 .network_tx
                 .try_send(RouterCmd::ListPeers)
-                .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e)),
+                .unwrap_or_else(|e| error!("[REPL] Failed to queue router command {:?}", e)),
             _ => println!("help: peers expects no arguments"),
         };
         Ok(Action::Done)
@@ -162,7 +167,7 @@ impl Repl {
             [actor_id] => {
                 self.network_tx
                     .try_send(RouterCmd::Trust(actor_id.to_string()))
-                    .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
+                    .unwrap_or_else(|e| error!("[REPL] Failed to queue router command {:?}", e));
             }
             _ => println!("help: trust id:8sdkgalsd"),
         };
@@ -175,7 +180,7 @@ impl Repl {
             [actor_id] => {
                 self.network_tx
                     .try_send(RouterCmd::Untrust(actor_id.to_string()))
-                    .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
+                    .unwrap_or_else(|e| error!("[REPL] Failed to queue router command {:?}", e));
             }
             _ => println!("help: untrust id:8f4e"),
         };
@@ -188,7 +193,7 @@ impl Repl {
             [actor_id] => {
                 self.network_tx
                     .try_send(RouterCmd::RequestJoin(actor_id.to_string()))
-                    .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
+                    .unwrap_or_else(|e| error!("[REPL] Failed to queue router command {:?}", e));
             }
             _ => println!("help: join takes one arguments, the actor to add to the network"),
         };
@@ -201,7 +206,7 @@ impl Repl {
             [actor_id] => {
                 self.network_tx
                     .try_send(RouterCmd::RequestLeave(actor_id.to_string()))
-                    .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
+                    .unwrap_or_else(|e| error!("[REPL] Failed to queue router command {:?}", e));
             }
             _ => println!("help: leave takes one arguments, the actor to leave the network"),
         };
@@ -214,7 +219,7 @@ impl Repl {
             [actor_id] => {
                 self.network_tx
                     .try_send(RouterCmd::AntiEntropy(actor_id.to_string()))
-                    .unwrap_or_else(|e| println!("Failed to queue router command {:?}", e));
+                    .unwrap_or_else(|e| error!("[REPL] Failed to queue router command {:?}", e));
             }
             _ => println!("help: anti_entropy takes one arguments, the actor to request data from"),
         };
@@ -241,7 +246,7 @@ impl Repl {
                             .expect("Failed to queue packet");
                     }
                 }
-                Err(_) => println!("[REPL] bad arg: '{}'", arg),
+                Err(_) => error!("[REPL] bad arg: '{}'", arg),
             },
             _ => println!("help: add <v>"),
         }
@@ -259,7 +264,7 @@ impl Repl {
                             .expect("Failed to queue packet");
                     }
                 }
-                Err(_) => println!("[REPL] bad arg: '{}'", arg),
+                Err(_) => error!("[REPL] bad arg: '{}'", arg),
             },
             _ => println!("help: remove <v>"),
         }
@@ -384,14 +389,14 @@ impl Router {
         match endpoint.connect_to(&dest_addr).await {
             Ok((conn, _)) => {
                 match conn.send_uni(msg.clone().into()).await {
-                    Ok(_) => println!("Sent network msg successfully."),
-                    Err(e) => println!("Failed to send network msg: {:?}", e),
+                    Ok(_) => info!("[P2P] Sent network msg successfully."),
+                    Err(e) => error!("[P2P] Failed to send network msg: {:?}", e),
                 }
                 conn.close();
             }
             Err(err) => {
-                println!(
-                    "Failed to connect to destination {:?}: {:?}",
+                error!(
+                    "[P2P] Failed to connect to destination {:?}: {:?}",
                     dest_addr, err
                 );
             }
@@ -401,7 +406,7 @@ impl Router {
     async fn deliver_packet(&mut self, packet: Packet) {
         match self.peers.get(&packet.dest) {
             Some(peer_addr) => {
-                println!(
+                info!(
                     "[P2P] delivering packet to {:?} at addr {:?}: {:?}",
                     packet.dest, peer_addr, packet
                 );
@@ -409,7 +414,7 @@ impl Router {
                 self.deliver_network_msg(&NetworkMsg::Packet(packet), &peer_addr)
                     .await;
             }
-            None => println!(
+            None => warn!(
                 "[P2P] we don't have a peer matching the destination for packet {:?}",
                 packet
             ),
@@ -417,7 +422,7 @@ impl Router {
     }
 
     async fn apply(&mut self, cmd: RouterCmd) {
-        println!("[P2P] router cmd {:?}", cmd);
+        debug!("[P2P] router cmd {:?}", cmd);
         match cmd {
             RouterCmd::Retry => {
                 let packets_to_retry = self.unacked_packets.clone();
@@ -428,11 +433,11 @@ impl Router {
                 }
             }
             RouterCmd::Debug => {
-                println!("{:#?}", self);
+                debug!("{:#?}", self);
             }
             RouterCmd::AntiEntropy(actor_id) => {
                 if let Some(actor) = self.resolve_actor(&actor_id) {
-                    println!("Starting anti-entropy with actor: {:?}", actor);
+                    info!("[P2P] Starting anti-entropy with actor: {:?}", actor);
                     if let Some(packet) = self.state.anti_entropy(actor) {
                         self.deliver_packet(packet).await;
                     }
@@ -468,7 +473,7 @@ impl Router {
             }
             RouterCmd::RequestJoin(actor_id) => {
                 if let Some(actor) = self.resolve_actor(&actor_id) {
-                    println!("Starting join for actor: {:?}", actor);
+                    info!("[P2P] Starting join for actor: {:?}", actor);
                     for packet in self.state.request_join(actor) {
                         self.deliver_packet(packet).await;
                     }
@@ -476,7 +481,7 @@ impl Router {
             }
             RouterCmd::RequestLeave(actor_id) => {
                 if let Some(actor) = self.resolve_actor(&actor_id) {
-                    println!("Starting leave for actor: {:?}", actor);
+                    info!("[P2P] Starting leave for actor: {:?}", actor);
                     for packet in self.state.request_leave(actor) {
                         self.deliver_packet(packet).await;
                     }
@@ -484,13 +489,13 @@ impl Router {
             }
             RouterCmd::Trust(actor_id) => {
                 if let Some(actor) = self.resolve_actor(&actor_id) {
-                    println!("Trusting actor: {:?}", actor);
+                    info!("[P2P] Trusting actor: {:?}", actor);
                     self.state.trust_peer(actor);
                 }
             }
             RouterCmd::Untrust(actor_id) => {
                 if let Some(actor) = self.resolve_actor(&actor_id) {
-                    println!("Trusting actor: {:?}", actor);
+                    info!("[P2P] Trusting actor: {:?}", actor);
                     self.state.untrust_peer(actor);
                 }
             }
@@ -518,14 +523,14 @@ impl Router {
                 }
 
                 if let Some(peer_addr) = self.peers.get(&op_packet.source) {
-                    println!(
+                    info!(
                         "[P2P] delivering Ack(packet) to {:?} at addr {:?}: {:?}",
                         op_packet.dest, peer_addr, op_packet
                     );
                     self.deliver_network_msg(&NetworkMsg::Ack(op_packet), &peer_addr)
                         .await;
                 } else {
-                    println!(
+                    warn!(
                         "[P2P] we don't have a peer matching the destination for packet {:?}",
                         op_packet
                     );
@@ -536,7 +541,7 @@ impl Router {
                     .iter()
                     .position(|p| p == &packet)
                     .map(|idx| {
-                        println!("Got ack for packet {:?}", packet);
+                        info!("[P2P] Got ack for packet {:?}", packet);
                         self.unacked_packets.remove(idx)
                     });
             }
@@ -549,7 +554,7 @@ async fn listen_for_network_msgs(endpoint: Endpoint, mut router_tx: mpsc::Sender
         .socket_addr()
         .await
         .expect("Failed to read listening socket addr");
-    println!("[P2P] listening on {:?}", listen_addr);
+    info!("[P2P] listening on {:?}", listen_addr);
 
     router_tx
         .send(RouterCmd::SayHello(listen_addr))
@@ -573,11 +578,21 @@ async fn listen_for_network_msgs(endpoint: Endpoint, mut router_tx: mpsc::Sender
         }
     }
 
-    println!("Finished listening for connections");
+    info!("[P2P] Finished listening for connections");
 }
 
 #[tokio::main]
 async fn main() {
+    // Customize logger to:
+    //  1. display messages from brb crates only.  (filter)
+    //  2. omit timestamp, etc.  display each log message string + newline.
+    env_logger::Builder::from_env(
+        env_logger::Env::default()
+            .default_filter_or("brb=debug,brb_membership=debug,brb_dt_orswot=debug,brb_node=debug"),
+    )
+    .format(|buf, record| writeln!(buf, "{}\n", record.args()))
+    .init();
+
     let state = SharedBRB::new();
     let (router, endpoint) = Router::new(state.clone()).await;
     let (router_tx, router_rx) = mpsc::channel(100);
