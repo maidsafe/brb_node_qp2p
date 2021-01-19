@@ -18,6 +18,8 @@ brb_dt_orswot = { git = "https://github.com/maidsafe/brb_dt_orswot", branch = "m
 cmdr = "0.3.12"
 tokio = { version = "~0.2.22", features = ["full"] }
 qp2p = "0.9.9"
+log = "0.4.13"
+env_logger = "0.8.2"
 
 # [profile.test]
 # opt-level = 3
