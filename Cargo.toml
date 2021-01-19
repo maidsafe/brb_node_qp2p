@@ -17,7 +17,7 @@ brb = { git = "https://github.com/maidsafe/brb", branch = "master" }
 brb_dt_orswot = { git = "https://github.com/maidsafe/brb_dt_orswot", branch = "master" }
 cmdr = "0.3.12"
 tokio = { version = "~0.2.22", features = ["full"] }
-qp2p = { git = "https://github.com/maidsafe/qp2p", rev = "10b7c25b55788cb4e1253e557cfe6d8d53d00cb0" }
+qp2p = "0.9.9"
 
 # [profile.test]
 # opt-level = 3
