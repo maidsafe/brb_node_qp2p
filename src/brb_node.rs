@@ -130,6 +130,14 @@ impl Repl {
         Self { state, network_tx }
     }
 
+    // cmdr::Scope hook that is called after command execution is finished.  overriding.
+    fn after_command(&mut self, _line: &Line, result: CommandResult) -> CommandResult {
+        // Delay writing prompt by 1 second to reduce chance that P2P log output in
+        // other thread overwrites it.
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        result
+    }
+
     #[cmd]
     fn peer(&mut self, args: &[String]) -> CommandResult {
         match args {
@@ -599,5 +607,8 @@ async fn main() {
 
     tokio::spawn(listen_for_network_msgs(endpoint, router_tx.clone()));
     tokio::spawn(router.listen_for_cmds(router_rx));
+
+    // Delay by 1 second to prevent P2P startup from overwriting user prompt.
+    std::thread::sleep(std::time::Duration::from_secs(1));
     cmd_loop(&mut Repl::new(state, router_tx)).expect("Failure in REPL");
 }
