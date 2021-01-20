@@ -25,19 +25,25 @@ We will demonstrate an interactive session with two nodes A and B.
 
 ```
 $ cargo run
-[P2P] listening on Ok(127.0.0.1:59232)
-[P2P] router cmd SayHello(127.0.0.1:59232)
-[P2P] router cmd AddPeer(i:cb6b, 127.0.0.1:59232)
+[P2P] listening on 127.0.0.1:41644
+
+[P2P] router cmd SayHello(127.0.0.1:41644)
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd AddPeer(i:877dca, 127.0.0.1:41644)
 
 > trust i:cb6b
-[P2P] router cmd Trust("i:cb6b")
-Trusting actor: i:cb6b
-[BRB] i:cb6b is forcing i:cb6b to join
+[P2P] router cmd Trust("i:877dca")
+
+[P2P] Trusting actor: i:877dca
+
+[BRB] i:877dca is forcing i:877dca to join
 
 > peers
 [P2P] router cmd ListPeers
-i:2d63@127.0.0.1:36138
-i:cb6b@127.0.0.1:59232        (voting)        (self)
+
+i:877dca@127.0.0.1:41644 (voting) (self)
 ```
 
 ### Joining an existing Group
@@ -48,24 +54,37 @@ i:cb6b@127.0.0.1:59232        (voting)        (self)
 
 ```
 $ cargo run
-[P2P] listening on Ok(127.0.0.1:36138)
-[P2P] router cmd SayHello(127.0.0.1:36138)
-[P2P] router cmd AddPeer(i:2d63, 127.0.0.1:36138)
+[P2P] listening on 127.0.0.1:53261
 
-> peer 127.0.0.1:59232
-[REPL] parsed addr 127.0.0.1:59232
-[P2P] router cmd SayHello(127.0.0.1:59232)
-[P2P] router cmd AddPeer(i:cb6b, 127.0.0.1:59232)
+[P2P] router cmd SayHello(127.0.0.1:53261)
 
-> trust i:cb6b
-[P2P] router cmd Trust("i:cb6b")
-Trusting actor: i:cb6b
-[BRB] i:2d63 is forcing i:cb6b to join
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd AddPeer(i:3497d6, 127.0.0.1:53261)
+
+> peer 127.0.0.1:41644
+[REPL] parsed addr 127.0.0.1:41644
+
+[P2P] router cmd SayHello(127.0.0.1:41644)
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd AddPeer(i:877dca, 127.0.0.1:41644)
+
+[P2P] Sent network msg successfully.
+
+> trust i:877dca
+[P2P] router cmd Trust("i:877dca")
+
+[P2P] Trusting actor: i:877dca
+
+[BRB] i:3497d6 is forcing i:877dca to join
 
 > peers
 [P2P] router cmd ListPeers
-i:2d63@127.0.0.1:36138  (self)
-i:cb6b@127.0.0.1:59232  (voting)
+
+i:3497d6@127.0.0.1:53261 (self)
+i:877dca@127.0.0.1:41644 (voting)
 ```
 
 `Peer A` sponsors/proposes `B` to join voting group and members {`A`} vote/agree to include `B`.
@@ -76,25 +95,55 @@ note: `B` may have asked `A` to sponsor out of band.  ie, not part of membership
 
 
 ```
-> join i:2d63
-[P2P] router cmd RequestJoin("i:2d63")
-Starting join for actor: i:2d63
-[P2P] delivering packet to i:cb6b at addr 127.0.0.1:59232: Packet { source: i:cb6b, dest: i:cb6b, payload: Membership(P(Ji:2d63)@i:cb6bG1), sig: sig:d59a }
-Sent packet successfully.
-[P2P] router cmd Apply(Packet { source: i:cb6b, dest: i:cb6b, payload: Membership(P(Ji:2d63)@i:cb6bG1), sig: sig:d59a })
-[BRB] handling packet from i:cb6b->i:cb6b
+> join i:3497d6
+[P2P] router cmd RequestJoin("i:3497d6")
+
+[P2P] Starting join for actor: i:3497d6
+
+[P2P] delivering packet to i:877dca at addr 127.0.0.1:41644: Packet { source: i:877dca, dest: i:877dca, payload: Membership(P(Ji:3497d6)@i:877dcaG1), sig: sig:7c6d35 }
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd Apply(Packet { source: i:877dca, dest: i:877dca, payload: Membership(P(Ji:3497d6)@i:877dcaG1), sig: sig:7c6d35 })
+
+[BRB] handling packet from i:877dca->i:877dca
+
 [MBR] Detected super majority
+
 [MBR] broadcasting super majority
-[P2P] delivering packet to i:cb6b at addr 127.0.0.1:59232: Packet { source: i:cb6b, dest: i:cb6b, payload: Membership(SM{P(Ji:2d63)@i:cb6bG1}@i:cb6bG1), sig: sig:e89a }
-Sent packet successfully.
-[P2P] router cmd Apply(Packet { source: i:cb6b, dest: i:cb6b, payload: Membership(SM{P(Ji:2d63)@i:cb6bG1}@i:cb6bG1), sig: sig:e89a })
-[BRB] handling packet from i:cb6b->i:cb6b
+
+[P2P] delivering packet to i:877dca at addr 127.0.0.1:41644: Packet { source: i:877dca, dest: i:877dca, payload: Membership(SM{P(Ji:3497d6)@i:877dcaG1}@i:877dcaG1), sig: sig:0d3413 }
+
+[P2P] Sent network msg successfully.
+
+[P2P] delivering Ack(packet) to i:877dca at addr 127.0.0.1:41644: Packet { source: i:877dca, dest: i:877dca, payload: Membership(P(Ji:3497d6)@i:877dcaG1), sig: sig:7c6d35 }
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd Apply(Packet { source: i:877dca, dest: i:877dca, payload: Membership(SM{P(Ji:3497d6)@i:877dcaG1}@i:877dcaG1), sig: sig:0d3413 })
+
+[BRB] handling packet from i:877dca->i:877dca
+
 [MBR] Detected super majority over super majorities
+
+[P2P] delivering Ack(packet) to i:877dca at addr 127.0.0.1:41644: Packet { source: i:877dca, dest: i:877dca, payload: Membership(SM{P(Ji:3497d6)@i:877dcaG1}@i:877dcaG1), sig: sig:0d3413 }
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd Acked(Packet { source: i:877dca, dest: i:877dca, payload: Membership(P(Ji:3497d6)@i:877dcaG1), sig: sig:7c6d35 })
+
+[P2P] Got ack for packet Packet { source: i:877dca, dest: i:877dca, payload: Membership(P(Ji:3497d6)@i:877dcaG1), sig: sig:7c6d35 }
+
+[P2P] router cmd Acked(Packet { source: i:877dca, dest: i:877dca, payload: Membership(SM{P(Ji:3497d6)@i:877dcaG1}@i:877dcaG1), sig: sig:0d3413 })
+
+[P2P] Got ack for packet Packet { source: i:877dca, dest: i:877dca, payload: Membership(SM{P(Ji:3497d6)@i:877dcaG1}@i:877dcaG1), sig: sig:0d3413 }
+
 
 > peers
 [P2P] router cmd ListPeers
-i:2d63@127.0.0.1:36138  (voting)
-i:cb6b@127.0.0.1:59232  (voting)        (self)
+
+i:3497d6@127.0.0.1:53261 (voting)
+i:877dca@127.0.0.1:41644 (voting) (self)
 ```
 
 `Peer B` is not yet aware of the vote, so initiates an `enti_entropy` round with `A` to obtain voting history.
@@ -105,23 +154,40 @@ After which, `B` knows self to be a voting member of the group.
 ```
 > peers
 [P2P] router cmd ListPeers
-i:2d63@127.0.0.1:36138  (self)
-> i:cb6b@127.0.0.1:59232        (voting)
 
-> anti_entropy i:cb6b
-[P2P] router cmd AntiEntropy("i:cb6b")
-Starting anti-entropy with actor: i:cb6b
-[P2P] delivering packet to i:cb6b at addr 127.0.0.1:59232: Packet { source: i:2d63, dest: i:cb6b, payload: AntiEntropy { generation: 0, delivered: VClock { dots: {} } }, sig: sig:e301 }
-Sent packet successfully.
-[P2P] router cmd Apply(Packet { source: i:cb6b, dest: i:2d63, payload: Membership(SM{SM{P(Ji:2d63)@i:cb6bG1}@i:cb6bG1}@i:cb6bG1), sig: sig:9310 })
-[BRB] handling packet from i:cb6b->i:2d63
+i:3497d6@127.0.0.1:53261 (self)
+i:877dca@127.0.0.1:41644 (voting)
+
+> anti_entropy i:877dca
+[P2P] router cmd AntiEntropy("i:877dca")
+
+[P2P] Starting anti-entropy with actor: i:877dca
+
+[P2P] delivering packet to i:877dca at addr 127.0.0.1:41644: Packet { source: i:3497d6, dest: i:877dca, payload: AntiEntropy { generation: 0, delivered: VClock { dots: {} } }, sig: sig:dc0b5e }
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd Apply(Packet { source: i:877dca, dest: i:3497d6, payload: Membership(SM{SM{P(Ji:3497d6)@i:877dcaG1}@i:877dcaG1}@i:877dcaG1), sig: sig:4b70ba })
+
+[BRB] handling packet from i:877dca->i:3497d6
+
 [MBR] Detected super majority over super majorities
+
 [MBR] Adding vote to history
+
+[P2P] delivering Ack(packet) to i:3497d6 at addr 127.0.0.1:41644: Packet { source: i:877dca, dest: i:3497d6, payload: Membership(SM{SM{P(Ji:3497d6)@i:877dcaG1}@i:877dcaG1}@i:877dcaG1), sig: sig:4b70ba }
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd Acked(Packet { source: i:3497d6, dest: i:877dca, payload: AntiEntropy { generation: 0, delivered: VClock { dots: {} } }, sig: sig:dc0b5e })
+
+[P2P] Got ack for packet Packet { source: i:3497d6, dest: i:877dca, payload: AntiEntropy { generation: 0, delivered: VClock { dots: {} } }, sig: sig:dc0b5e }
 
 > peers
 [P2P] router cmd ListPeers
-> i:2d63@127.0.0.1:36138        (voting)        (self)
-i:cb6b@127.0.0.1:59232  (voting)
+
+i:3497d6@127.0.0.1:53261 (voting) (self)
+i:877dca@127.0.0.1:41644 (voting)
 ```
 
 ### Data Operation
@@ -132,35 +198,99 @@ i:cb6b@127.0.0.1:59232  (voting)
 ```
 > read
 {}
+
 > add 3
-[BRB] i:2d63 initiating bft for msg Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 }
-[BRB] broadcasting i:2d63->{i:2d63, i:cb6b}
-[P2P] router cmd Deliver(Packet { source: i:2d63, dest: i:2d63, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 } }), sig: sig:75d6 })
-[P2P] delivering packet to i:2d63 at addr 127.0.0.1:36138: Packet { source: i:2d63, dest: i:2d63, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 } }), sig: sig:75d6 }
-> Sent packet successfully.
-[P2P] router cmd Deliver(Packet { source: i:2d63, dest: i:cb6b, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 } }), sig: sig:75d6 })
-[P2P] delivering packet to i:cb6b at addr 127.0.0.1:59232: Packet { source: i:2d63, dest: i:cb6b, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 } }), sig: sig:75d6 }
-Sent packet successfully.
-[P2P] router cmd Apply(Packet { source: i:2d63, dest: i:2d63, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 } }), sig: sig:75d6 })
-[BRB] handling packet from i:2d63->i:2d63
+[BRB] i:3497d6 initiating bft for msg Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }
+
+[BRB] broadcasting i:3497d6->{i:3497d6, i:877dca}
+
+[P2P] router cmd Deliver(Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 } }), sig: sig:aaad75 })
+
+[P2P] delivering packet to i:3497d6 at addr 127.0.0.1:53261: Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 } }), sig: sig:aaad75 }
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd Deliver(Packet { source: i:3497d6, dest: i:877dca, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 } }), sig: sig:aaad75 })
+
+[P2P] delivering packet to i:877dca at addr 127.0.0.1:41644: Packet { source: i:3497d6, dest: i:877dca, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 } }), sig: sig:aaad75 }
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd Apply(Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 } }), sig: sig:aaad75 })
+
+[BRB] handling packet from i:3497d6->i:3497d6
+
 [BRB] request for validation
-[P2P] delivering packet to i:2d63 at addr 127.0.0.1:36138: Packet { source: i:2d63, dest: i:2d63, payload: BRB(SignedValidated { msg: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 }, sig: sig:084c }), sig: sig:52d8 }
-Sent packet successfully.
-[P2P] router cmd Apply(Packet { source: i:cb6b, dest: i:2d63, payload: BRB(SignedValidated { msg: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 }, sig: sig:fcb4 }), sig: sig:f311 })
-[BRB] handling packet from i:cb6b->i:2d63
+
+[P2P] delivering packet to i:3497d6 at addr 127.0.0.1:53261: Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(SignedValidated { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, sig: sig:f1c841 }), sig: sig:e1095c }
+
+[P2P] Sent network msg successfully.
+
+[P2P] delivering Ack(packet) to i:3497d6 at addr 127.0.0.1:53261: Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 } }), sig: sig:aaad75 }
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd Apply(Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(SignedValidated { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, sig: sig:f1c841 }), sig: sig:e1095c })
+
+[BRB] handling packet from i:3497d6->i:3497d6
+
 [BRB] signed validated
-[P2P] router cmd Apply(Packet { source: i:2d63, dest: i:2d63, payload: BRB(SignedValidated { msg: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 }, sig: sig:084c }), sig: sig:52d8 })
-[BRB] handling packet from i:2d63->i:2d63
+
+[P2P] delivering Ack(packet) to i:3497d6 at addr 127.0.0.1:53261: Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(SignedValidated { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, sig: sig:f1c841 }), sig: sig:e1095c }
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd Apply(Packet { source: i:877dca, dest: i:3497d6, payload: BRB(SignedValidated { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, sig: sig:fe9a31 }), sig: sig:289701 })
+
+[BRB] handling packet from i:877dca->i:3497d6
+
 [BRB] signed validated
+
 [BRB] we have quorum over msg, sending proof to network
-[BRB] broadcasting i:2d63->{i:2d63, i:cb6b}
-[P2P] delivering packet to i:2d63 at addr 127.0.0.1:36138: Packet { source: i:2d63, dest: i:2d63, payload: BRB(ProofOfAgreement { msg: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 }, proof: {i:2d63: sig:084c, i:cb6b: sig:fcb4} }), sig: sig:c1b6 }
-Sent packet successfully.
-[P2P] delivering packet to i:cb6b at addr 127.0.0.1:59232: Packet { source: i:2d63, dest: i:cb6b, payload: BRB(ProofOfAgreement { msg: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 }, proof: {i:2d63: sig:084c, i:cb6b: sig:fcb4} }), sig: sig:c1b6 }
-Sent packet successfully.
-[P2P] router cmd Apply(Packet { source: i:2d63, dest: i:2d63, payload: BRB(ProofOfAgreement { msg: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 }, proof: {i:2d63: sig:084c, i:cb6b: sig:fcb4} }), sig: sig:c1b6 })
-[BRB] handling packet from i:2d63->i:2d63
-[BRB] proof of agreement: Msg { gen: 1, op: Add(i:2d63.1, [3]), dot: i:2d63.1 }
+
+[BRB] broadcasting i:3497d6->{i:3497d6, i:877dca}
+
+[P2P] delivering packet to i:3497d6 at addr 127.0.0.1:53261: Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(ProofOfAgreement { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, proof: {i:3497d6: sig:f1c841, i:877dca: sig:fe9a31} }), sig: sig:e8c238 }
+
+[P2P] Sent network msg successfully.
+
+[P2P] delivering packet to i:877dca at addr 127.0.0.1:41644: Packet { source: i:3497d6, dest: i:877dca, payload: BRB(ProofOfAgreement { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, proof: {i:3497d6: sig:f1c841, i:877dca: sig:fe9a31} }), sig: sig:e8c238 }
+
+[P2P] Sent network msg successfully.
+
+[P2P] delivering Ack(packet) to i:3497d6 at addr 127.0.0.1:41644: Packet { source: i:877dca, dest: i:3497d6, payload: BRB(SignedValidated { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, sig: sig:fe9a31 }), sig: sig:289701 }
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd Acked(Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 } }), sig: sig:aaad75 })
+
+[P2P] Got ack for packet Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 } }), sig: sig:aaad75 }
+
+[P2P] router cmd Acked(Packet { source: i:3497d6, dest: i:877dca, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 } }), sig: sig:aaad75 })
+
+[P2P] Got ack for packet Packet { source: i:3497d6, dest: i:877dca, payload: BRB(RequestValidation { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 } }), sig: sig:aaad75 }
+
+[P2P] router cmd Acked(Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(SignedValidated { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, sig: sig:f1c841 }), sig: sig:e1095c })
+
+[P2P] Got ack for packet Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(SignedValidated { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, sig: sig:f1c841 }), sig: sig:e1095c }
+
+[P2P] router cmd Apply(Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(ProofOfAgreement { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, proof: {i:3497d6: sig:f1c841, i:877dca: sig:fe9a31} }), sig: sig:e8c238 })
+
+[BRB] handling packet from i:3497d6->i:3497d6
+
+[BRB] proof of agreement: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }
+
+[P2P] delivering Ack(packet) to i:3497d6 at addr 127.0.0.1:53261: Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(ProofOfAgreement { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, proof: {i:3497d6: sig:f1c841, i:877dca: sig:fe9a31} }), sig: sig:e8c238 }
+
+[P2P] Sent network msg successfully.
+
+[P2P] router cmd Acked(Packet { source: i:3497d6, dest: i:877dca, payload: BRB(ProofOfAgreement { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, proof: {i:3497d6: sig:f1c841, i:877dca: sig:fe9a31} }), sig: sig:e8c238 })
+
+[P2P] Got ack for packet Packet { source: i:3497d6, dest: i:877dca, payload: BRB(ProofOfAgreement { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, proof: {i:3497d6: sig:f1c841, i:877dca: sig:fe9a31} }), sig: sig:e8c238 }
+
+[P2P] router cmd Acked(Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(ProofOfAgreement { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, proof: {i:3497d6: sig:f1c841, i:877dca: sig:fe9a31} }), sig: sig:e8c238 })
+
+[P2P] Got ack for packet Packet { source: i:3497d6, dest: i:3497d6, payload: BRB(ProofOfAgreement { msg: Msg { gen: 1, op: Add(i:3497d6.1, [3]), dot: i:3497d6.1 }, proof: {i:3497d6: sig:f1c841, i:877dca: sig:fe9a31} }), sig: sig:e8c238 }
 
 > read
 {3}
@@ -172,7 +302,6 @@ Sent packet successfully.
 > read
 {3}
 ```
-
 
 
 ## License
