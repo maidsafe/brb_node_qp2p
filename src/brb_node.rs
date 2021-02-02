@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+use bytes::Bytes;
 use std::sync::{Arc, Mutex};
+use tokio::sync;
 use tokio::sync::mpsc;
 
 use cmdr::*;
@@ -8,10 +10,11 @@ use cmdr::*;
 use log::{debug, error, info, trace, warn};
 use std::io::Write;
 
-use qp2p::{self, Config, Connection, Endpoint, IncomingMessages, QuicP2p};
+use qp2p::{
+    self, Config, DisconnectionEvents, Endpoint, IncomingConnections, IncomingMessages, QuicP2p,
+};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
-    fmt,
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
@@ -116,6 +119,36 @@ impl SharedBRB {
 
     fn read(&self) -> HashSet<Value> {
         self.brb.lock().unwrap().dt.orswot().read().val
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SharedEndpoint {
+    endpoint: Arc<sync::Mutex<Endpoint>>,
+}
+
+impl SharedEndpoint {
+    fn new(e: Endpoint) -> Self {
+        Self {
+            endpoint: Arc::new(sync::Mutex::new(e)),
+        }
+    }
+
+    pub async fn socket_addr(&self) -> SocketAddr {
+        self.endpoint.lock().await.socket_addr()
+    }
+
+    pub async fn connect_to(&self, node_addr: &SocketAddr) -> qp2p::Result<()> {
+        self.endpoint.lock().await.connect_to(node_addr).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn close(&self) {
+        self.endpoint.lock().await.close()
+    }
+
+    pub async fn send_message(&self, msg: Bytes, dest: &SocketAddr) -> qp2p::Result<()> {
+        self.endpoint.lock().await.send_message(msg, dest).await
     }
 }
 
@@ -298,14 +331,13 @@ impl Repl {
 #[derive(Debug)]
 struct Router {
     state: SharedBRB,
-    qp2p: QuicP2p,
     addr: SocketAddr,
+    endpoint: SharedEndpoint,
     peers: HashMap<Actor, SocketAddr>,
-    lastconn: HashMap<SocketAddr, MyConnection>,
     unacked_packets: VecDeque<Packet>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 enum RouterCmd {
     Retry,
     Debug,
@@ -330,22 +362,21 @@ enum NetworkMsg {
     Ack(Packet),
 }
 
-struct MyConnection(Connection);
-
-impl fmt::Debug for MyConnection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Connection")
-            .field("remote_address", &self.0.remote_address())
-            .finish()
-    }
+#[allow(dead_code)]
+struct EndpointInfo {
+    shared_endpoint: SharedEndpoint,
+    incoming_connections: IncomingConnections,
+    incoming_messages: IncomingMessages,
+    disconnection_events: DisconnectionEvents,
 }
 
 impl Router {
-    async fn new(state: SharedBRB) -> (Self, Endpoint) {
+    async fn new(state: SharedBRB) -> (Self, EndpointInfo) {
         let qp2p = QuicP2p::with_config(
             Some(Config {
-                port: Some(0),
-                ip: Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+                local_port: None,
+                local_ip: Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+                idle_timeout_msec: Some(1000 * 86400 * 365), // 1 year idle timeout.
                 ..Default::default()
             }),
             Default::default(),
@@ -353,26 +384,25 @@ impl Router {
         )
         .expect("Error creating QuicP2p object");
 
-        let endpoint = qp2p.new_endpoint().expect("Failed to create endpoint");
-        let addr = endpoint
-            .socket_addr()
-            .await
-            .expect("Failed to read our addr from endpoint");
+        let epmeta = qp2p.new_endpoint().await.unwrap();
+        let endpoint_info = EndpointInfo {
+            shared_endpoint: SharedEndpoint::new(epmeta.0),
+            incoming_connections: epmeta.1,
+            incoming_messages: epmeta.2,
+            disconnection_events: epmeta.3,
+        };
+
+        let addr = endpoint_info.shared_endpoint.socket_addr().await;
 
         let router = Self {
             state,
-            qp2p,
             addr,
+            endpoint: endpoint_info.shared_endpoint.clone(),
             peers: Default::default(),
-            lastconn: Default::default(),
             unacked_packets: Default::default(),
         };
 
-        (router, endpoint)
-    }
-
-    fn new_endpoint(&self) -> Endpoint {
-        self.qp2p.new_endpoint().expect("Failed to create endpoint")
+        (router, endpoint_info)
     }
 
     fn resolve_actor(&self, actor_id: &str) -> Option<Actor> {
@@ -410,21 +440,24 @@ impl Router {
 
     async fn deliver_network_msg(&mut self, network_msg: &NetworkMsg, dest_addr: &SocketAddr) {
         let msg = bincode::serialize(&network_msg).unwrap();
-        let endpoint = self.new_endpoint();
-        match endpoint.connect_to(&dest_addr).await {
-            Ok((conn, _)) => {
-                match conn.send_uni(msg.clone().into()).await {
-                    Ok(_) => trace!("[P2P] Sent network msg successfully."),
-                    Err(e) => error!("[P2P] Failed to send network msg: {:?}", e),
-                }
-                self.lastconn.insert(*dest_addr, MyConnection(conn));
-            }
-            Err(err) => {
-                error!(
-                    "[P2P] Failed to connect to destination {:?}: {:?}",
-                    dest_addr, err
-                );
-            }
+
+        if let Err(e) = self.endpoint.connect_to(&dest_addr).await {
+            error!("[P2P] Failed to connect. {:?}", e);
+            return;
+        }
+
+        let logmsg = format!(
+            "[P2P] Sending message to {:?} --> {:?}",
+            dest_addr, network_msg
+        );
+        match network_msg {
+            NetworkMsg::Ack(_) => trace!("{}", logmsg),
+            _ => debug!("{}", logmsg),
+        }
+
+        match self.endpoint.send_message(msg.into(), &dest_addr).await {
+            Ok(()) => trace!("[P2P] Sent network msg successfully."),
+            Err(e) => error!("[P2P] Failed to send network msg: {:?}", e),
         }
     }
 
@@ -447,9 +480,10 @@ impl Router {
     }
 
     async fn apply(&mut self, cmd: RouterCmd) {
+        let logmsg = format!("[P2P] router cmd {:?}", cmd);
         match cmd {
-            RouterCmd::Acked(_) => trace!("[P2P] router cmd {:?}", cmd),
-            _ => debug!("[P2P] router cmd {:?}", cmd),
+            RouterCmd::Acked(_) => trace!("{}", logmsg),
+            _ => debug!("{}", logmsg),
         }
 
         match cmd {
@@ -462,7 +496,7 @@ impl Router {
                 }
             }
             RouterCmd::Debug => {
-                println!("{:#?}", self);
+                debug!("{:#?}", self);
             }
             RouterCmd::AntiEntropy(actor_id) => {
                 if let Some(actor) = self.resolve_actor(&actor_id) {
@@ -580,11 +614,11 @@ impl Router {
     }
 }
 
-async fn listen_for_network_msgs(endpoint: Endpoint, mut router_tx: mpsc::Sender<RouterCmd>) {
-    let listen_addr = endpoint
-        .socket_addr()
-        .await
-        .expect("Failed to read listening socket addr");
+async fn listen_for_network_msgs(
+    mut endpoint_info: EndpointInfo,
+    mut router_tx: mpsc::Sender<RouterCmd>,
+) {
+    let listen_addr = endpoint_info.shared_endpoint.socket_addr().await;
     info!("[P2P] listening on {:?}", listen_addr);
 
     router_tx
@@ -592,24 +626,15 @@ async fn listen_for_network_msgs(endpoint: Endpoint, mut router_tx: mpsc::Sender
         .await
         .expect("Failed to send command to add self as peer");
 
-    let mut conns = endpoint.listen();
-    while let Some(msgs) = conns.next().await {
-        // spawn a new thread to handle incoming messages for this connection.
-        // This allows us to continue listening for additional connections.
-        tokio::spawn(handle_incoming_messages(router_tx.clone(), msgs));
-    }
+    while let Some((socket_addr, bytes)) = endpoint_info.incoming_messages.next().await {
+        let net_msg: NetworkMsg = bincode::deserialize(&bytes).unwrap();
 
-    info!("[P2P] Finished listening for connections");
-}
+        let msg = format!("[P2P] received from {:?} --> {:?}", socket_addr, net_msg);
+        match net_msg {
+            NetworkMsg::Ack(_) => trace!("{}", msg),
+            _ => debug!("{}", msg),
+        }
 
-// A thread to handle incoming message stream for a single connection
-// and forward them to our Router.
-async fn handle_incoming_messages(
-    mut router_tx: mpsc::Sender<RouterCmd>,
-    mut msgs: IncomingMessages,
-) {
-    while let Some(msg) = msgs.next().await {
-        let net_msg: NetworkMsg = bincode::deserialize(&msg.get_message_data()).unwrap();
         let cmd = match net_msg {
             NetworkMsg::Peer(actor, addr) => RouterCmd::AddPeer(actor, addr),
             NetworkMsg::Packet(packet) => RouterCmd::Apply(packet),
@@ -621,6 +646,8 @@ async fn handle_incoming_messages(
             .await
             .expect("Failed to send router command");
     }
+
+    info!("[P2P] Finished listening for incoming messages");
 }
 
 #[tokio::main]
@@ -628,18 +655,17 @@ async fn main() {
     // Customize logger to:
     //  1. display messages from brb crates only.  (filter)
     //  2. omit timestamp, etc.  display each log message string + newline.
-    env_logger::Builder::from_env(
-        env_logger::Env::default()
-            .default_filter_or("brb=debug,brb_membership=debug,brb_dt_orswot=debug,brb_node=debug"),
-    )
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(
+        "brb=debug,brb_membership=debug,brb_dt_orswot=debug,brb_node=debug,qp2p=warn,quinn=warn",
+    ))
     .format(|buf, record| writeln!(buf, "{}\n", record.args()))
     .init();
 
     let state = SharedBRB::new();
-    let (router, endpoint) = Router::new(state.clone()).await;
+    let (router, endpoint_info) = Router::new(state.clone()).await;
     let (router_tx, router_rx) = mpsc::channel(100);
 
-    tokio::spawn(listen_for_network_msgs(endpoint, router_tx.clone()));
+    tokio::spawn(listen_for_network_msgs(endpoint_info, router_tx.clone()));
     tokio::spawn(router.listen_for_cmds(router_rx));
 
     // Delay by 1 second to prevent P2P startup from overwriting user prompt.
