@@ -5,12 +5,13 @@ use tokio::sync::mpsc;
 
 use cmdr::*;
 
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use std::io::Write;
 
-use qp2p::{self, Config, Endpoint, QuicP2p};
+use qp2p::{self, Config, Connection, Endpoint, IncomingMessages, QuicP2p};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    fmt,
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
@@ -177,7 +178,7 @@ impl Repl {
                     .try_send(RouterCmd::Trust(actor_id.to_string()))
                     .unwrap_or_else(|e| error!("[REPL] Failed to queue router command {:?}", e));
             }
-            _ => println!("help: trust id:8sdkgalsd"),
+            _ => println!("help: trust id:8sdkgalsd | trust me"),
         };
         Ok(Action::Done)
     }
@@ -300,10 +301,11 @@ struct Router {
     qp2p: QuicP2p,
     addr: SocketAddr,
     peers: HashMap<Actor, SocketAddr>,
+    lastconn: HashMap<SocketAddr, MyConnection>,
     unacked_packets: VecDeque<Packet>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum RouterCmd {
     Retry,
     Debug,
@@ -326,6 +328,16 @@ enum NetworkMsg {
     Peer(Actor, SocketAddr),
     Packet(Packet),
     Ack(Packet),
+}
+
+struct MyConnection(Connection);
+
+impl fmt::Debug for MyConnection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Connection")
+            .field("remote_address", &self.0.remote_address())
+            .finish()
+    }
 }
 
 impl Router {
@@ -352,6 +364,7 @@ impl Router {
             qp2p,
             addr,
             peers: Default::default(),
+            lastconn: Default::default(),
             unacked_packets: Default::default(),
         };
 
@@ -363,6 +376,10 @@ impl Router {
     }
 
     fn resolve_actor(&self, actor_id: &str) -> Option<Actor> {
+        if actor_id == "me" {
+            return Some(self.state.actor());
+        }
+
         let matching_actors: Vec<Actor> = self
             .peers
             .iter()
@@ -391,16 +408,16 @@ impl Router {
         }
     }
 
-    async fn deliver_network_msg(&self, network_msg: &NetworkMsg, dest_addr: &SocketAddr) {
+    async fn deliver_network_msg(&mut self, network_msg: &NetworkMsg, dest_addr: &SocketAddr) {
         let msg = bincode::serialize(&network_msg).unwrap();
         let endpoint = self.new_endpoint();
         match endpoint.connect_to(&dest_addr).await {
             Ok((conn, _)) => {
                 match conn.send_uni(msg.clone().into()).await {
-                    Ok(_) => info!("[P2P] Sent network msg successfully."),
+                    Ok(_) => trace!("[P2P] Sent network msg successfully."),
                     Err(e) => error!("[P2P] Failed to send network msg: {:?}", e),
                 }
-                conn.close();
+                self.lastconn.insert(*dest_addr, MyConnection(conn));
             }
             Err(err) => {
                 error!(
@@ -412,7 +429,7 @@ impl Router {
     }
 
     async fn deliver_packet(&mut self, packet: Packet) {
-        match self.peers.get(&packet.dest) {
+        match self.peers.clone().get(&packet.dest) {
             Some(peer_addr) => {
                 info!(
                     "[P2P] delivering packet to {:?} at addr {:?}: {:?}",
@@ -430,18 +447,22 @@ impl Router {
     }
 
     async fn apply(&mut self, cmd: RouterCmd) {
-        debug!("[P2P] router cmd {:?}", cmd);
+        match cmd {
+            RouterCmd::Acked(_) => trace!("[P2P] router cmd {:?}", cmd),
+            _ => debug!("[P2P] router cmd {:?}", cmd),
+        }
+
         match cmd {
             RouterCmd::Retry => {
                 let packets_to_retry = self.unacked_packets.clone();
                 self.unacked_packets = Default::default();
                 for packet in packets_to_retry {
-                    println!("Retrying packet: {:#?}", packet);
+                    info!("Retrying packet: {:#?}", packet);
                     self.deliver_packet(packet).await
                 }
             }
             RouterCmd::Debug => {
-                debug!("{:#?}", self);
+                println!("{:#?}", self);
             }
             RouterCmd::AntiEntropy(actor_id) => {
                 if let Some(actor) = self.resolve_actor(&actor_id) {
@@ -515,7 +536,7 @@ impl Router {
             {
                 #[allow(clippy::map_entry)]
                 if !self.peers.contains_key(&actor) {
-                    for (peer_actor, peer_addr) in self.peers.iter() {
+                    for (peer_actor, peer_addr) in self.peers.clone().iter() {
                         self.deliver_network_msg(&NetworkMsg::Peer(*peer_actor, *peer_addr), &addr)
                             .await;
                     }
@@ -530,10 +551,12 @@ impl Router {
                     self.deliver_packet(packet).await;
                 }
 
-                if let Some(peer_addr) = self.peers.get(&op_packet.source) {
-                    info!(
+                if let Some(peer_addr) = self.peers.clone().get(&op_packet.source) {
+                    trace!(
                         "[P2P] delivering Ack(packet) to {:?} at addr {:?}: {:?}",
-                        op_packet.dest, peer_addr, op_packet
+                        op_packet.dest,
+                        peer_addr,
+                        op_packet
                     );
                     self.deliver_network_msg(&NetworkMsg::Ack(op_packet), &peer_addr)
                         .await;
@@ -549,7 +572,7 @@ impl Router {
                     .iter()
                     .position(|p| p == &packet)
                     .map(|idx| {
-                        info!("[P2P] Got ack for packet {:?}", packet);
+                        trace!("[P2P] Got ack for packet {:?}", packet);
                         self.unacked_packets.remove(idx)
                     });
             }
@@ -570,23 +593,34 @@ async fn listen_for_network_msgs(endpoint: Endpoint, mut router_tx: mpsc::Sender
         .expect("Failed to send command to add self as peer");
 
     let mut conns = endpoint.listen();
-    while let Some(mut msgs) = conns.next().await {
-        while let Some(msg) = msgs.next().await {
-            let net_msg: NetworkMsg = bincode::deserialize(&msg.get_message_data()).unwrap();
-            let cmd = match net_msg {
-                NetworkMsg::Peer(actor, addr) => RouterCmd::AddPeer(actor, addr),
-                NetworkMsg::Packet(packet) => RouterCmd::Apply(packet),
-                NetworkMsg::Ack(packet) => RouterCmd::Acked(packet),
-            };
-
-            router_tx
-                .send(cmd)
-                .await
-                .expect("Failed to send router command");
-        }
+    while let Some(msgs) = conns.next().await {
+        // spawn a new thread to handle incoming messages for this connection.
+        // This allows us to continue listening for additional connections.
+        tokio::spawn(handle_incoming_messages(router_tx.clone(), msgs));
     }
 
     info!("[P2P] Finished listening for connections");
+}
+
+// A thread to handle incoming message stream for a single connection
+// and forward them to our Router.
+async fn handle_incoming_messages(
+    mut router_tx: mpsc::Sender<RouterCmd>,
+    mut msgs: IncomingMessages,
+) {
+    while let Some(msg) = msgs.next().await {
+        let net_msg: NetworkMsg = bincode::deserialize(&msg.get_message_data()).unwrap();
+        let cmd = match net_msg {
+            NetworkMsg::Peer(actor, addr) => RouterCmd::AddPeer(actor, addr),
+            NetworkMsg::Packet(packet) => RouterCmd::Apply(packet),
+            NetworkMsg::Ack(packet) => RouterCmd::Acked(packet),
+        };
+
+        router_tx
+            .send(cmd)
+            .await
+            .expect("Failed to send router command");
+    }
 }
 
 #[tokio::main]
