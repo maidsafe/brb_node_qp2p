@@ -1,6 +1,6 @@
 [package]
 name = "brb_node_qp2p"
-version = "1.0.2"
+version = "1.0.3"
 description = "a simple P2P node (CLI) for interactively using BRB"
 authors = [ "David Rusu <davidrusu.me@gmail.com>" ]
 license = "MIT OR BSD-3-Clause"
@@ -24,6 +24,6 @@ log = "0.4.14"
 env_logger = "0.8.2"
 futures = "0.3.12"
 
-[dependencies.tokio]
-version = "~0.2.22"
-features = [ "full" ]
+  [dependencies.tokio]
+  version = "~0.2.22"
+  features = [ "full" ]
