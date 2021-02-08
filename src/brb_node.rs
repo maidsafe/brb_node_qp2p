@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use bytes::Bytes;
 use std::sync::{Arc, Mutex};
-use tokio::sync;
 use tokio::sync::mpsc;
 
 use cmdr::*;
@@ -119,36 +117,6 @@ impl SharedBRB {
 
     fn read(&self) -> HashSet<Value> {
         self.brb.lock().unwrap().dt.orswot().read().val
-    }
-}
-
-#[derive(Debug, Clone)]
-struct SharedEndpoint {
-    endpoint: Arc<sync::Mutex<Endpoint>>,
-}
-
-impl SharedEndpoint {
-    fn new(e: Endpoint) -> Self {
-        Self {
-            endpoint: Arc::new(sync::Mutex::new(e)),
-        }
-    }
-
-    pub async fn socket_addr(&self) -> SocketAddr {
-        self.endpoint.lock().await.socket_addr()
-    }
-
-    pub async fn connect_to(&self, node_addr: &SocketAddr) -> qp2p::Result<()> {
-        self.endpoint.lock().await.connect_to(node_addr).await
-    }
-
-    #[allow(dead_code)]
-    pub async fn close(&self) {
-        self.endpoint.lock().await.close()
-    }
-
-    pub async fn send_message(&self, msg: Bytes, dest: &SocketAddr) -> qp2p::Result<()> {
-        self.endpoint.lock().await.send_message(msg, dest).await
     }
 }
 
@@ -332,7 +300,7 @@ impl Repl {
 struct Router {
     state: SharedBRB,
     addr: SocketAddr,
-    endpoint: SharedEndpoint,
+    endpoint: Endpoint,
     peers: HashMap<Actor, SocketAddr>,
     unacked_packets: VecDeque<Packet>,
 }
@@ -364,7 +332,7 @@ enum NetworkMsg {
 
 #[allow(dead_code)]
 struct EndpointInfo {
-    shared_endpoint: SharedEndpoint,
+    shared_endpoint: Endpoint,
     incoming_connections: IncomingConnections,
     incoming_messages: IncomingMessages,
     disconnection_events: DisconnectionEvents,
@@ -386,13 +354,13 @@ impl Router {
 
         let epmeta = qp2p.new_endpoint().await.unwrap();
         let endpoint_info = EndpointInfo {
-            shared_endpoint: SharedEndpoint::new(epmeta.0),
+            shared_endpoint: epmeta.0,
             incoming_connections: epmeta.1,
             incoming_messages: epmeta.2,
             disconnection_events: epmeta.3,
         };
 
-        let addr = endpoint_info.shared_endpoint.socket_addr().await;
+        let addr = endpoint_info.shared_endpoint.socket_addr();
 
         let router = Self {
             state,
@@ -618,7 +586,7 @@ async fn listen_for_network_msgs(
     mut endpoint_info: EndpointInfo,
     mut router_tx: mpsc::Sender<RouterCmd>,
 ) {
-    let listen_addr = endpoint_info.shared_endpoint.socket_addr().await;
+    let listen_addr = endpoint_info.shared_endpoint.socket_addr();
     info!("[P2P] listening on {:?}", listen_addr);
 
     router_tx
