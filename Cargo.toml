@@ -1,6 +1,6 @@
 [package]
 name = "brb_node_qp2p"
-version = "1.0.5"
+version = "1.0.6"
 description = "a simple P2P node (CLI) for interactively using BRB"
 authors = [ "David Rusu <davidrusu.me@gmail.com>" ]
 license = "MIT OR BSD-3-Clause"
