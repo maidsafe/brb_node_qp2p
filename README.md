@@ -33,7 +33,7 @@ $ cargo run
 
 [P2P] router cmd AddPeer(i:877dca, 127.0.0.1:41644)
 
-> trust i:cb6b
+> trust i:877dca
 [P2P] router cmd Trust("i:877dca")
 
 [P2P] Trusting actor: i:877dca
